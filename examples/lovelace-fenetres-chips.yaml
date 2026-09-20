@@ -1,0 +1,80 @@
+# Chips card for the Window Airing integration.
+# One chip per configured room, built from the integration's delta sensors:
+# each carries wa_room=True plus windows_open / windows_total / area_name /
+# raining / airing, so the card needs no Shelly naming and follows the
+# integration's own discovery (Shelly, DS18B20, Airzone... exclusions applied).
+type: custom:auto-entities
+card_param: chips
+card:
+  type: custom:mushroom-chips-card
+  card_mod:
+    style: |
+      ha-card {
+        margin: -4px -4px 4px -4px !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        border-bottom: 1px solid var(--divider-color) !important;
+      }
+      ha-card .chips {
+        flex-wrap: wrap !important;
+        gap: 4px !important;
+        padding: 8px 12px !important;
+      }
+filter:
+  template: >
+    {#- Collect the integration's per-room delta sensors via their stable
+        marker attribute (wa_room). No dependency on entity naming. -#}
+    {%- set ns = namespace(rooms=[], chips=[]) -%}
+    {%- for s in states.sensor -%}
+      {%- if s.attributes.wa_room is defined -%}
+        {%- set ns.rooms = ns.rooms + [s] -%}
+      {%- endif -%}
+    {%- endfor -%}
+
+    {#- ── SUMMARY CHIP ── totals across every room -#}
+    {%- set nb = ns.rooms | map(attribute='attributes.windows_open')
+          | map('int', 0) | sum -%}
+    {%- set total = ns.rooms | map(attribute='attributes.windows_total')
+          | map('int', 0) | sum -%}
+    {%- set ns.chips = [{
+      'type': 'template',
+      'icon': 'mdi:window-open-variant' if nb > 0 else 'mdi:window-closed-variant',
+      'icon_color': 'grey' if nb == 0 else ('green' if nb == total else 'orange'),
+      'content': 'N/C' if total == 0 else (
+                 'Tout fermé' if nb == 0 else (
+                 'Tout ouvert' if nb == total else nb ~ '/' ~ total ~ ' ouvertes')),
+      'tap_action': {'action': 'none'},
+      'hold_action': {'action': 'none'}
+    }] -%}
+
+    {#- ── ONE CHIP PER ROOM ── sorted by area name for a stable order -#}
+    {%- for s in ns.rooms | sort(attribute='attributes.area_name') -%}
+      {%- set label = s.attributes.area_name -%}
+      {%- set ouvertes = s.attributes.windows_open | int(0) -%}
+      {%- set tot = s.attributes.windows_total | int(0) -%}
+      {%- set d = s.state | float(none) -%}
+      {#- Partial fraction only for multi-window rooms -#}
+      {%- set frac = (' ' ~ ouvertes ~ '/' ~ tot)
+                     if (ouvertes > 0 and ouvertes < tot) else '' -%}
+      {%- set delta = '' if d is none else
+            ' · ' ~ ('+' if d > 0 else '') ~ (d | round(1)) ~ '°C' -%}
+      {%- set pluie = ' 🌧' if (s.attributes.raining and ouvertes > 0) else '' -%}
+      {#- Colour: blue when indoor clearly warmer, red when outdoor warmer -#}
+      {%- set couleur = 'grey' if d is none else
+            ('blue' if d > 0.3 else ('red' if d < 0 else 'grey')) -%}
+      {#- Airing recommended pulls attention to orange -#}
+      {%- if s.attributes.airing and ouvertes > 0 -%}
+        {%- set couleur = 'orange' -%}
+      {%- endif -%}
+      {%- set ns.chips = ns.chips + [{
+        'type': 'template',
+        'entity': s.entity_id,
+        'icon': 'mdi:window-open-variant' if ouvertes > 0 else 'mdi:window-closed-variant',
+        'icon_color': couleur,
+        'content': label ~ frac ~ delta ~ pluie,
+        'tap_action': {'action': 'more-info'},
+        'card_mod': {'style': ':host { opacity: 0.55; }'} if ouvertes == 0 else {}
+      }] -%}
+    {%- endfor -%}
+
+    {{ ns.chips }}

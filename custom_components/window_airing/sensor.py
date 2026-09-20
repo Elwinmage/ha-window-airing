@@ -55,6 +55,24 @@ class WindowAiringDeltaSensor(_Base):
     def native_value(self):
         return self.coordinator.data.get("delta")
 
+    @property
+    def extra_state_attributes(self):
+        # Everything a chips card needs to render one room, keyed by area.
+        # `wa_room` is a stable marker to find these sensors from a template.
+        d = self.coordinator.data
+        return {
+            "wa_room": True,
+            "area_id": self.coordinator.area_id,
+            "area_name": self.coordinator.area_name,
+            "windows_open": d.get("windows_open"),
+            "windows_total": d.get("windows_total"),
+            "indoor": d.get("indoor"),
+            "outdoor": d.get("outdoor"),
+            "raining": d.get("raining"),
+            "airing": bool(d.get("airing_reasons")),
+            "reasons": d.get("airing_reasons", []),
+        }
+
 
 class WindowAiringIndoorSensor(_Base):
     _attr_translation_key = "indoor"

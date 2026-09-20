@@ -13,6 +13,8 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import (
@@ -74,9 +76,46 @@ def _optional_entity(key: str, current: dict[str, Any]) -> vol.Optional:
     return vol.Optional(key)
 
 
-def _options_schema(current: dict[str, Any]) -> vol.Schema:
+def _area_temp_platforms(hass, area_id: str) -> list[str]:
+    """Integrations that provide a temperature sensor in this area.
+
+    Offered as ready-made choices in the exclude list, so a user can drop, say,
+    every 'redsea' temperature at once without knowing its platform slug.
+    """
+    if not area_id:
+        return []
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    platforms: set[str] = set()
+    for entity in ent_reg.entities.values():
+        if not entity.entity_id.startswith("sensor."):
+            continue
+        area = entity.area_id
+        if area is None and entity.device_id:
+            device = dev_reg.async_get(entity.device_id)
+            area = device.area_id if device else None
+        if area != area_id:
+            continue
+        dc = None
+        state = hass.states.get(entity.entity_id)
+        if state:
+            dc = state.attributes.get("device_class")
+        if dc is None:
+            dc = entity.device_class or entity.original_device_class
+        if dc == "temperature":
+            platforms.add(entity.platform)
+    return sorted(platforms)
+
+
+def _options_schema(current: dict[str, Any], extra_platforms: list[str]) -> vol.Schema:
     def num(key, fallback):
         return current.get(key, fallback)
+
+    # Base computed platforms + the integrations actually present in the room.
+    platform_options = list(DEFAULT_EXCLUDE_PLATFORMS)
+    for p in extra_platforms:
+        if p not in platform_options:
+            platform_options.append(p)
 
     return vol.Schema(
         {
@@ -152,10 +191,7 @@ def _options_schema(current: dict[str, Any]) -> vol.Schema:
                 default=num(CONF_EXCLUDE_PLATFORMS, DEFAULT_EXCLUDE_PLATFORMS),
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=[
-                        "template", "derivative", "statistics", "min_max",
-                        "integration", "trend", "filter", "group", "average",
-                    ],
+                    options=platform_options,
                     multiple=True,
                     custom_value=True,
                 )
@@ -236,6 +272,10 @@ class WindowAiringOptionsFlow(OptionsFlow):
             return self.async_create_entry(title="", data=cleaned)
 
         current = {**self.entry.data, **self.entry.options}
+        extra_platforms = _area_temp_platforms(
+            self.hass, self.entry.data.get(CONF_AREA)
+        )
         return self.async_show_form(
-            step_id="init", data_schema=_options_schema(current)
+            step_id="init",
+            data_schema=_options_schema(current, extra_platforms),
         )

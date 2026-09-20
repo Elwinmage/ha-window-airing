@@ -106,6 +106,11 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
     def area_id(self) -> str:
         return self.entry.data[CONF_AREA]
 
+    @property
+    def area_name(self) -> str:
+        area = ar.async_get(self.hass).async_get_area(self.area_id)
+        return area.name if area else self.area_id
+
     def _opt(self, key, default):
         return self._cfg.get(key, default)
 
@@ -381,11 +386,19 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             delta = round(indoor - outdoor, 2)
 
         open_windows = self._open_windows()
+        available = [
+            e
+            for e in self.windows
+            if (st := self.hass.states.get(e))
+            and st.state not in ("unavailable", "unknown")
+        ]
         data = {
             "indoor": indoor,
             "outdoor": outdoor,
             "delta": delta,
             "open_count": len(open_windows),
+            "windows_open": len(open_windows),
+            "windows_total": len(available),
             # Clim uses the static option delay; notifications use the live number.
             "open_delayed_clim": self._open_delayed(
                 self._opt(CONF_OPEN_DELAY, DEFAULT_OPEN_DELAY)

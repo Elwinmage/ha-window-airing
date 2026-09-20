@@ -31,7 +31,7 @@
           "rain_mm_threshold": "Seuil de pluie pour capteur numérique (mm)",
           "weather": "Entité météo",
           "weather_rain_states": "États météo considérés comme pluie",
-          "exclude_platforms": "Plateformes de capteurs exclues (température)",
+          "exclude_platforms": "Intégrations de température à exclure (ex. template, redsea)",
           "exclude_entities": "Entités exclues (toute la découverte)",
           "override_windows": "Override — contacts de fenêtre",
           "override_indoor": "Override — température intérieure",
