@@ -43,6 +43,7 @@ class _Base(CoordinatorEntity[WindowAiringCoordinator], BinarySensorEntity):
     def __init__(self, coordinator: WindowAiringCoordinator, key: str) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
+        self._attr_device_info = coordinator.device_info
 
 
 class AiringRecommended(_Base):
@@ -61,7 +62,7 @@ class AiringRecommended(_Base):
         threshold = cfg.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)
         use_trend = cfg.get(CONF_USE_TREND, False)
         return bool(
-            d.get("open_delayed")
+            d.get("open_delayed_notify")
             and d.get("delta") is not None
             and d["delta"] < threshold
             and (not use_trend or not d.get("trend_rising"))

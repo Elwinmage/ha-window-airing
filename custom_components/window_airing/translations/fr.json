@@ -21,7 +21,7 @@
         "data": {
           "device_classes": "device_class des contacts de fenêtre",
           "threshold": "Seuil de fermeture (°C)",
-          "open_delay": "Délai d'ouverture avant réaction (s)",
+          "open_delay": "Délai d'ouverture avant coupure clim (s)",
           "use_trend": "N'alerter que si la température ne monte pas",
           "manage_clim": "Gérer la climatisation (couper/rallumer)",
           "rain_alert": "Alerter si ouvert sous la pluie",
@@ -44,6 +44,9 @@
       "airing_recommended": { "name": "Aération plus utile" },
       "open_in_rain": { "name": "Ouvert sous la pluie" },
       "trend_rising": { "name": "Température en hausse" }
+    },
+    "number": {
+      "notify_delay": { "name": "Délai avant notification" }
     }
   }
 }

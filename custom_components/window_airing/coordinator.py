@@ -40,6 +40,7 @@ from .const import (
     CONF_WEATHER,
     CONF_WEATHER_RAIN_STATES,
     DEFAULT_DEVICE_CLASSES,
+    DEFAULT_NOTIFY_DELAY,
     DEFAULT_OPEN_DELAY,
     DEFAULT_THRESHOLD,
     DEFAULT_WEATHER_RAIN_STATES,
@@ -79,6 +80,10 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         self._rain_sent = False
         self._clim_memorized = False
 
+        # Live notify delay (seconds), driven by the per-room `number` entity,
+        # which restores its own stored value on start.
+        self.notify_delay_s = DEFAULT_NOTIFY_DELAY
+
         # Trend samples: (monotonic_ts, indoor_avg_temp).
         self._trend: deque[tuple[float, float]] = deque()
 
@@ -98,6 +103,21 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
 
     def _opt(self, key, default):
         return self._cfg.get(key, default)
+
+    @property
+    def device_info(self) -> dr.DeviceInfo:
+        """One device per room; its name prefixes every entity name.
+
+        NOTE: this device is intentionally NOT placed in the monitored area,
+        otherwise its own temperature sensors would be picked up by discovery.
+        """
+        area = ar.async_get(self.hass).async_get_area(self.area_id)
+        return dr.DeviceInfo(
+            identifiers={(DOMAIN, self.entry.entry_id)},
+            name=area.name if area else self.area_id,
+            manufacturer="Window Airing",
+            model="Room airing monitor",
+        )
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     async def async_setup(self) -> None:
@@ -142,6 +162,10 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         dev_reg = dr.async_get(self.hass)
         result: list[str] = []
         for entity in ent_reg.entities.values():
+            # Never discover our own calculated entities (their delta/indoor
+            # sensors carry device_class temperature and would loop).
+            if entity.platform == DOMAIN:
+                continue
             area = entity.area_id
             if area is None and entity.device_id:
                 device = dev_reg.async_get(entity.device_id)
@@ -288,9 +312,9 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             e for e in self.windows if self.hass.states.is_state(e, "on")
         ]
 
-    def _open_delayed(self) -> bool:
-        delay = self._opt(CONF_OPEN_DELAY, DEFAULT_OPEN_DELAY)
-        threshold = dt_util.utcnow() - timedelta(seconds=delay)
+    def _open_delayed(self, delay_s: int) -> bool:
+        """True if at least one window has been open continuously for delay_s."""
+        threshold = dt_util.utcnow() - timedelta(seconds=delay_s)
         for e in self._open_windows():
             state = self.hass.states.get(e)
             if state and state.last_changed <= threshold:
@@ -325,7 +349,11 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             "outdoor": outdoor,
             "delta": delta,
             "open_count": len(open_windows),
-            "open_delayed": self._open_delayed(),
+            # Clim uses the static option delay; notifications use the live number.
+            "open_delayed_clim": self._open_delayed(
+                self._opt(CONF_OPEN_DELAY, DEFAULT_OPEN_DELAY)
+            ),
+            "open_delayed_notify": self._open_delayed(self.notify_delay_s),
             "trend_rising": self._trend_rising(),
             "raining": self._is_raining(),
             "open_names": self._open_names(),
@@ -344,7 +372,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 and self.hass.states.get(c).state not in CLIMATE_OFF_STATES
                 for c in self.climates
             )
-            if data["open_delayed"] and not self._clim_memorized and clim_running:
+            if data["open_delayed_clim"] and not self._clim_memorized and clim_running:
                 await self.hass.services.async_call(
                     "climate", "turn_off",
                     {"entity_id": self.climates}, blocking=False,
@@ -363,7 +391,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         threshold = self._opt(CONF_THRESHOLD, DEFAULT_THRESHOLD)
         use_trend = self._opt(CONF_USE_TREND, False)
         airing_now = (
-            data["open_delayed"]
+            data["open_delayed_notify"]
             and data["delta"] is not None
             and data["delta"] < threshold
             and (not use_trend or not data["trend_rising"])
@@ -379,7 +407,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         # ── Rain alert ───────────────────────────────────────────────────────
         rain_now = (
             self._opt(CONF_RAIN_ALERT, False)
-            and data["open_count"] > 0
+            and data["open_delayed_notify"]
             and data["raining"]
         )
         if rain_now and not self._rain_sent:

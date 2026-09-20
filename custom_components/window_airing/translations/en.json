@@ -21,7 +21,7 @@
         "data": {
           "device_classes": "Window contact device classes",
           "threshold": "Closing threshold (°C)",
-          "open_delay": "Open delay before reacting (s)",
+          "open_delay": "Open delay before cutting climate (s)",
           "use_trend": "Only alert when temperature is not rising",
           "manage_clim": "Manage climate (turn off/on)",
           "rain_alert": "Alert when open while raining",
@@ -44,6 +44,9 @@
       "airing_recommended": { "name": "Airing no longer useful" },
       "open_in_rain": { "name": "Open while raining" },
       "trend_rising": { "name": "Temperature rising" }
+    },
+    "number": {
+      "notify_delay": { "name": "Notify delay" }
     }
   }
 }

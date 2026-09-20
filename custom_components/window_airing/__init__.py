@@ -11,9 +11,10 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, PLATFORMS
-from .coordinator import WindowAiringCoordinator
+from .coordinator import STORAGE_VERSION, WindowAiringCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,3 +46,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the entry when its options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the persisted state store when the room is removed."""
+    store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}")
+    await store.async_remove()

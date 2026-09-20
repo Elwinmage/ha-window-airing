@@ -41,6 +41,7 @@ class _Base(CoordinatorEntity[WindowAiringCoordinator], SensorEntity):
         super().__init__(coordinator)
         self._key = key
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
+        self._attr_device_info = coordinator.device_info
 
 
 class WindowAiringDeltaSensor(_Base):

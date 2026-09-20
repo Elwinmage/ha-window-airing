@@ -1,12 +1,12 @@
 {
   "domain": "window_airing",
   "name": "Window Airing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "codeowners": ["@Elwinmage"],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/Elwinmage/ha-window-airing",
-  "integration_type": "helper",
+  "integration_type": "hub",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/Elwinmage/ha-window-airing/issues",
   "requirements": []
