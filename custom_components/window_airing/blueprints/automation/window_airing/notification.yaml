@@ -4,7 +4,7 @@
 # the integration fires `window_airing_alert` events (type "airing" or "rain")
 # and this blueprint decides who to notify, how, and when (quiet hours).
 blueprint:
-  name: "Surveillance fenêtre — Notifications (v1.0.0)"
+  name: "Surveillance fenêtre — Notifications (v1.1.0)"
   description: >
     Envoie les notifications de l'intégration Window Airing.
     Une seule instance suffit pour toute la maison : le blueprint écoute les
