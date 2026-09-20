@@ -25,9 +25,12 @@
           "use_trend": "N'alerter que si la température ne monte pas",
           "manage_clim": "Gérer la climatisation (couper/rallumer)",
           "rain_alert": "Alerter si ouvert sous la pluie",
-          "rain_sensor": "Capteur de pluie (binary_sensor)",
+          "rain_sensor": "Capteur de pluie (binary_sensor ou sensor en mm)",
+          "rain_mm_threshold": "Seuil de pluie pour capteur numérique (mm)",
           "weather": "Entité météo",
           "weather_rain_states": "États météo considérés comme pluie",
+          "exclude_platforms": "Plateformes de capteurs exclues (température)",
+          "exclude_entities": "Entités exclues (toute la découverte)",
           "override_windows": "Override — contacts de fenêtre",
           "override_indoor": "Override — température intérieure",
           "override_clim": "Override — climatisation"

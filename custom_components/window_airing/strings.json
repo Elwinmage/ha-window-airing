@@ -25,9 +25,12 @@
           "use_trend": "Only alert when temperature is not rising",
           "manage_clim": "Manage climate (turn off/on)",
           "rain_alert": "Alert when open while raining",
-          "rain_sensor": "Rain sensor (binary_sensor)",
+          "rain_sensor": "Rain sensor (binary_sensor or numeric mm)",
+          "rain_mm_threshold": "Rain threshold for a numeric sensor (mm)",
           "weather": "Weather entity",
           "weather_rain_states": "Weather states counted as rain",
+          "exclude_platforms": "Excluded sensor platforms (temperature)",
+          "exclude_entities": "Excluded entities (all discovery)",
           "override_windows": "Override — window contacts",
           "override_indoor": "Override — indoor temperature",
           "override_clim": "Override — climate"

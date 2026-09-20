@@ -13,18 +13,36 @@ CONF_DEVICE_CLASSES = "device_classes"
 CONF_OVERRIDE_WINDOWS = "override_windows"
 CONF_OVERRIDE_INDOOR = "override_indoor"
 CONF_OVERRIDE_CLIM = "override_clim"
+CONF_EXCLUDE_PLATFORMS = "exclude_platforms"
+CONF_EXCLUDE_ENTITIES = "exclude_entities"
 CONF_THRESHOLD = "threshold"
 CONF_OPEN_DELAY = "open_delay"          # seconds
 CONF_MANAGE_CLIM = "manage_clim"
 CONF_USE_TREND = "use_trend"
 CONF_RAIN_ALERT = "rain_alert"
 CONF_RAIN_SENSOR = "rain_sensor"
+CONF_RAIN_MM_THRESHOLD = "rain_mm_threshold"
 CONF_WEATHER = "weather"
 CONF_WEATHER_RAIN_STATES = "weather_rain_states"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 # Shelly BLU DoorWindow usually reports one of these; adjust in options if not.
 DEFAULT_DEVICE_CLASSES: list[str] = ["window", "door", "opening"]
+# Computed/aggregate sensor platforms that must NOT count as a physical room
+# temperature: they often carry device_class temperature but report a delta,
+# an average or a statistic. Physical sources (shelly, onewire/esphome for
+# DS18B20, airzone...) are not in this list and pass through. Editable in options.
+DEFAULT_EXCLUDE_PLATFORMS: list[str] = [
+    "template",
+    "derivative",
+    "statistics",
+    "min_max",
+    "integration",
+    "trend",
+    "filter",
+    "group",
+    "average",
+]
 DEFAULT_THRESHOLD = 0.3                 # °C, delta below which airing is useless
 DEFAULT_OPEN_DELAY = 60                 # s, continuous-open time before cutting clim
 # Notify delay is a live per-room `number` entity (minutes). This is only the
@@ -34,6 +52,8 @@ NOTIFY_DELAY_MAX_MIN = 120              # number entity upper bound (minutes)
 DEFAULT_WEATHER_RAIN_STATES: list[str] = [
     "rainy", "pouring", "lightning-rainy", "snowy-rainy", "hail",
 ]
+# For a numeric rain sensor (mm): raining when its value is strictly above this.
+DEFAULT_RAIN_MM_THRESHOLD = 0.0
 
 # ── Trend (replaces the manual Derivative helper) ────────────────────────────
 TREND_WINDOW = 900                      # s of samples kept for the slope

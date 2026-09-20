@@ -27,6 +27,8 @@ from .const import (
     CLIMATE_OFF_STATES,
     CONF_AREA,
     CONF_DEVICE_CLASSES,
+    CONF_EXCLUDE_ENTITIES,
+    CONF_EXCLUDE_PLATFORMS,
     CONF_EXTERIOR_TEMP,
     CONF_MANAGE_CLIM,
     CONF_OPEN_DELAY,
@@ -34,14 +36,17 @@ from .const import (
     CONF_OVERRIDE_INDOOR,
     CONF_OVERRIDE_WINDOWS,
     CONF_RAIN_ALERT,
+    CONF_RAIN_MM_THRESHOLD,
     CONF_RAIN_SENSOR,
     CONF_THRESHOLD,
     CONF_USE_TREND,
     CONF_WEATHER,
     CONF_WEATHER_RAIN_STATES,
     DEFAULT_DEVICE_CLASSES,
+    DEFAULT_EXCLUDE_PLATFORMS,
     DEFAULT_NOTIFY_DELAY,
     DEFAULT_OPEN_DELAY,
+    DEFAULT_RAIN_MM_THRESHOLD,
     DEFAULT_THRESHOLD,
     DEFAULT_WEATHER_RAIN_STATES,
     DOMAIN,
@@ -184,14 +189,26 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             return entry.device_class or entry.original_device_class
         return None
 
+    def _platform_of(self, entity_id: str) -> str | None:
+        """Source integration of an entity (e.g. 'shelly', 'template')."""
+        entry = er.async_get(self.hass).async_get(entity_id)
+        return entry.platform if entry else None
+
     @callback
     def _discover(self) -> None:
         override_w = self._opt(CONF_OVERRIDE_WINDOWS, [])
         override_i = self._opt(CONF_OVERRIDE_INDOOR, None)
         override_c = self._opt(CONF_OVERRIDE_CLIM, [])
         dcs = self._opt(CONF_DEVICE_CLASSES, DEFAULT_DEVICE_CLASSES)
+        exclude_platforms = set(
+            self._opt(CONF_EXCLUDE_PLATFORMS, DEFAULT_EXCLUDE_PLATFORMS)
+        )
+        exclude_entities = set(self._opt(CONF_EXCLUDE_ENTITIES, []))
 
-        entities = self._entities_in_area()
+        # Explicit exclusions drop out of every category up front.
+        entities = [
+            e for e in self._entities_in_area() if e not in exclude_entities
+        ]
 
         if override_w:
             self.windows = list(override_w)
@@ -206,11 +223,15 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         if override_i:
             self.indoor_sensors = [override_i]
         else:
+            # Keep physical temperature sensors only: computed/aggregate
+            # platforms (template deltas, derivatives, statistics...) are
+            # dropped even though they carry device_class temperature.
             self.indoor_sensors = [
                 e
                 for e in entities
                 if e.startswith("sensor.")
                 and self._device_class(e) == "temperature"
+                and self._platform_of(e) not in exclude_platforms
             ]
 
         if override_c:
@@ -296,8 +317,24 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
     # ── rain detection ───────────────────────────────────────────────────────
     def _is_raining(self) -> bool:
         rain_sensor = self._opt(CONF_RAIN_SENSOR, None)
-        if rain_sensor and self.hass.states.is_state(rain_sensor, "on"):
-            return True
+        if rain_sensor:
+            state = self.hass.states.get(rain_sensor)
+            if state is not None:
+                if rain_sensor.startswith("binary_sensor."):
+                    if state.state == "on":
+                        return True
+                else:
+                    # Numeric sensor in mm: raining above the configured threshold.
+                    try:
+                        threshold = float(
+                            self._opt(
+                                CONF_RAIN_MM_THRESHOLD, DEFAULT_RAIN_MM_THRESHOLD
+                            )
+                        )
+                        if float(state.state) > threshold:
+                            return True
+                    except (ValueError, TypeError):
+                        pass
         weather = self._opt(CONF_WEATHER, None)
         if weather:
             states = self._opt(CONF_WEATHER_RAIN_STATES, DEFAULT_WEATHER_RAIN_STATES)

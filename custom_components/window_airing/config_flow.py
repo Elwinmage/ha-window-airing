@@ -18,6 +18,8 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_AREA,
     CONF_DEVICE_CLASSES,
+    CONF_EXCLUDE_ENTITIES,
+    CONF_EXCLUDE_PLATFORMS,
     CONF_EXTERIOR_TEMP,
     CONF_MANAGE_CLIM,
     CONF_OPEN_DELAY,
@@ -25,13 +27,16 @@ from .const import (
     CONF_OVERRIDE_INDOOR,
     CONF_OVERRIDE_WINDOWS,
     CONF_RAIN_ALERT,
+    CONF_RAIN_MM_THRESHOLD,
     CONF_RAIN_SENSOR,
     CONF_THRESHOLD,
     CONF_USE_TREND,
     CONF_WEATHER,
     CONF_WEATHER_RAIN_STATES,
     DEFAULT_DEVICE_CLASSES,
+    DEFAULT_EXCLUDE_PLATFORMS,
     DEFAULT_OPEN_DELAY,
+    DEFAULT_RAIN_MM_THRESHOLD,
     DEFAULT_THRESHOLD,
     DEFAULT_WEATHER_RAIN_STATES,
     DOMAIN,
@@ -94,7 +99,16 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_RAIN_SENSOR, default=d(CONF_RAIN_SENSOR, "")
             ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="binary_sensor")
+                selector.EntitySelectorConfig(domain=["binary_sensor", "sensor"])
+            ),
+            vol.Optional(
+                CONF_RAIN_MM_THRESHOLD,
+                default=d(CONF_RAIN_MM_THRESHOLD, DEFAULT_RAIN_MM_THRESHOLD),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0, max=50.0, step=0.1, unit_of_measurement="mm",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
             ),
             vol.Optional(
                 CONF_WEATHER, default=d(CONF_WEATHER, "")
@@ -113,6 +127,25 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                     multiple=True,
                     custom_value=True,
                 )
+            ),
+            # ── Discovery exclusions ─────────────────────────────────────────
+            vol.Optional(
+                CONF_EXCLUDE_PLATFORMS,
+                default=d(CONF_EXCLUDE_PLATFORMS, DEFAULT_EXCLUDE_PLATFORMS),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        "template", "derivative", "statistics", "min_max",
+                        "integration", "trend", "filter", "group", "average",
+                    ],
+                    multiple=True,
+                    custom_value=True,
+                )
+            ),
+            vol.Optional(
+                CONF_EXCLUDE_ENTITIES, default=d(CONF_EXCLUDE_ENTITIES, [])
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(multiple=True)
             ),
             # ── Overrides (leave empty to keep auto-discovery) ───────────────
             vol.Optional(
