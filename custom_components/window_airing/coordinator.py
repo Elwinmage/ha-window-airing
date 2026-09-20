@@ -395,9 +395,27 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             "raining": self._is_raining(),
             "open_names": self._open_names(),
         }
+        # Distinct reasons airing is no longer useful (drives the message).
+        data["airing_reasons"] = self._airing_reasons(data)
 
         await self._evaluate_and_act(data)
         return data
+
+    def _airing_reasons(self, data: dict) -> list[str]:
+        """Which conditions make airing no longer useful (open long enough)."""
+        if not data["open_delayed_notify"]:
+            return []
+        reasons: list[str] = []
+        threshold = self._opt(CONF_THRESHOLD, DEFAULT_THRESHOLD)
+        delta = data["delta"]
+        if delta is not None:
+            if delta < 0:
+                reasons.append("outdoor_warmer")   # outside is now warmer
+            elif delta < threshold:
+                reasons.append("delta_low")         # marginal benefit left
+        if self._opt(CONF_USE_TREND, False) and data["trend_rising"]:
+            reasons.append("trend_rising")          # room warming despite open
+        return reasons
 
     async def _evaluate_and_act(self, data: dict) -> None:
         dirty = False
@@ -425,15 +443,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 dirty = True
 
         # ── Airing alert (signal the human via event; dedup on the edge) ─────
-        threshold = self._opt(CONF_THRESHOLD, DEFAULT_THRESHOLD)
-        use_trend = self._opt(CONF_USE_TREND, False)
-        airing_now = (
-            data["open_delayed_notify"]
-            and data["delta"] is not None
-            and data["delta"] < threshold
-            and (not use_trend or not data["trend_rising"])
-        )
-        if airing_now and not self._airing_sent:
+        if data["airing_reasons"] and not self._airing_sent:
             self._fire(ALERT_AIRING, data)
             self._airing_sent = True
             dirty = True
@@ -472,5 +482,6 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 "indoor": data["indoor"],
                 "outdoor": data["outdoor"],
                 "windows": data["open_names"],
+                "reasons": data.get("airing_reasons", []),
             },
         )

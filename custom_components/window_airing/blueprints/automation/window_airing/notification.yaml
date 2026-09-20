@@ -1,4 +1,4 @@
-# Version: 1.0.0
+# Version: 1.1.0
 # Bundled with the Window Airing integration. It appears automatically in the
 # blueprint list under "Window Airing". One instance handles the whole home:
 # the integration fires `window_airing_alert` events (type "airing" or "rain")
@@ -100,7 +100,17 @@ actions:
             data:
               title: "🪟 Ferme la fenêtre — {{ trigger.event.data.area_name }}"
               message: >
-                Plus utile de laisser ouvert : delta {{ trigger.event.data.delta }}°C
+                {% set labels = {
+                  'outdoor_warmer': "il fait plus chaud dehors que dedans",
+                  'delta_low': "l'écart intérieur/extérieur est devenu faible",
+                  'trend_rising': "la température intérieure monte"
+                } %}
+                {% set parts = namespace(l=[]) %}
+                {% for r in trigger.event.data.reasons | default([]) %}
+                  {% set parts.l = parts.l + [labels.get(r, r)] %}
+                {% endfor %}
+                Motif : {{ parts.l | join(' ; ') }}.
+                Delta {{ trigger.event.data.delta }}°C
                 (intérieur {{ trigger.event.data.indoor }}°C /
                 extérieur {{ trigger.event.data.outdoor }}°C)
                 {%- if trigger.event.data.windows | count > 1 %}

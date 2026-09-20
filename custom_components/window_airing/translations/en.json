@@ -3,10 +3,11 @@
     "step": {
       "user": {
         "title": "Window Airing — room",
-        "description": "Pick the room to monitor and the shared outdoor temperature sensor. Window contacts, indoor temperature and climate are auto-discovered from the room.",
+        "description": "Pick the room to monitor and the shared outdoor temperature sensor. A rain sensor is optional. Window contacts, indoor temperature and climate are auto-discovered from the room.",
         "data": {
           "area_id": "Room",
-          "exterior_temp": "Outdoor temperature sensor"
+          "exterior_temp": "Outdoor temperature sensor",
+          "rain_sensor": "Rain sensor (binary_sensor or numeric mm, optional)"
         }
       }
     },
@@ -19,10 +20,11 @@
       "init": {
         "title": "Window Airing — settings",
         "data": {
+          "exterior_temp": "Outdoor temperature sensor",
           "device_classes": "Window contact device classes",
           "threshold": "Closing threshold (°C)",
           "open_delay": "Open delay before cutting climate (s)",
-          "use_trend": "Only alert when temperature is not rising",
+          "use_trend": "Also alert when indoor temperature is rising",
           "manage_clim": "Manage climate (turn off/on)",
           "rain_alert": "Alert when open while raining",
           "rain_sensor": "Rain sensor (binary_sensor or numeric mm)",

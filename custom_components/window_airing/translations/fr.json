@@ -3,10 +3,11 @@
     "step": {
       "user": {
         "title": "Surveillance fenêtre — pièce",
-        "description": "Choisissez la pièce à surveiller et le capteur de température extérieure (partagé). Les contacts de fenêtre, la température intérieure et la climatisation sont découverts automatiquement dans la pièce.",
+        "description": "Choisissez la pièce à surveiller et le capteur de température extérieure (partagé). Un capteur de pluie est facultatif. Les contacts de fenêtre, la température intérieure et la climatisation sont découverts automatiquement dans la pièce.",
         "data": {
           "area_id": "Pièce",
-          "exterior_temp": "Capteur température extérieure"
+          "exterior_temp": "Capteur température extérieure",
+          "rain_sensor": "Capteur de pluie (binary_sensor ou sensor en mm, facultatif)"
         }
       }
     },
@@ -19,10 +20,11 @@
       "init": {
         "title": "Surveillance fenêtre — réglages",
         "data": {
+          "exterior_temp": "Capteur température extérieure",
           "device_classes": "device_class des contacts de fenêtre",
           "threshold": "Seuil de fermeture (°C)",
           "open_delay": "Délai d'ouverture avant coupure clim (s)",
-          "use_trend": "N'alerter que si la température ne monte pas",
+          "use_trend": "Alerter aussi si la température intérieure monte",
           "manage_clim": "Gérer la climatisation (couper/rallumer)",
           "rain_alert": "Alerter si ouvert sous la pluie",
           "rain_sensor": "Capteur de pluie (binary_sensor ou sensor en mm)",

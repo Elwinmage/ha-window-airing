@@ -1,7 +1,7 @@
 {
   "domain": "window_airing",
   "name": "Window Airing",
-  "version": "0.2.2",
+  "version": "0.3.1",
   "codeowners": ["@Elwinmage"],
   "config_flow": true,
   "dependencies": [],

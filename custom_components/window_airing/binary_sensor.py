@@ -11,14 +11,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    CONF_MANAGE_CLIM,
-    CONF_RAIN_ALERT,
-    CONF_THRESHOLD,
-    CONF_USE_TREND,
-    DEFAULT_THRESHOLD,
-    DOMAIN,
-)
+from .const import DOMAIN
 from .coordinator import WindowAiringCoordinator
 
 
@@ -57,16 +50,11 @@ class AiringRecommended(_Base):
 
     @property
     def is_on(self) -> bool:
-        d = self.coordinator.data
-        cfg = self.coordinator._cfg
-        threshold = cfg.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)
-        use_trend = cfg.get(CONF_USE_TREND, False)
-        return bool(
-            d.get("open_delayed_notify")
-            and d.get("delta") is not None
-            and d["delta"] < threshold
-            and (not use_trend or not d.get("trend_rising"))
-        )
+        return bool(self.coordinator.data.get("airing_reasons"))
+
+    @property
+    def extra_state_attributes(self):
+        return {"reasons": self.coordinator.data.get("airing_reasons", [])}
 
 
 class OpenInRain(_Base):
