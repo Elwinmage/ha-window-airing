@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Window Airing — room",
+        "description": "Pick the room to monitor and the shared outdoor temperature sensor. Window contacts, indoor temperature and climate are auto-discovered from the room.",
+        "data": {
+          "area_id": "Room",
+          "exterior_temp": "Outdoor temperature sensor"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This room already has a Window Airing entry."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Window Airing — settings",
+        "data": {
+          "device_classes": "Window contact device classes",
+          "threshold": "Closing threshold (°C)",
+          "open_delay": "Open delay before reacting (s)",
+          "use_trend": "Only alert when temperature is not rising",
+          "manage_clim": "Manage climate (turn off/on)",
+          "rain_alert": "Alert when open while raining",
+          "rain_sensor": "Rain sensor (binary_sensor)",
+          "weather": "Weather entity",
+          "weather_rain_states": "Weather states counted as rain",
+          "override_windows": "Override — window contacts",
+          "override_indoor": "Override — indoor temperature",
+          "override_clim": "Override — climate"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "delta": { "name": "Delta indoor/outdoor" },
+      "indoor": { "name": "Indoor temperature (avg)" }
+    },
+    "binary_sensor": {
+      "airing_recommended": { "name": "Airing no longer useful" },
+      "open_in_rain": { "name": "Open while raining" },
+      "trend_rising": { "name": "Temperature rising" }
+    }
+  }
+}

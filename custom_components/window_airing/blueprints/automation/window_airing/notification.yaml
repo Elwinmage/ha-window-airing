@@ -1,0 +1,122 @@
+# Version: 1.0.0
+# Bundled with the Window Airing integration. It appears automatically in the
+# blueprint list under "Window Airing". One instance handles the whole home:
+# the integration fires `window_airing_alert` events (type "airing" or "rain")
+# and this blueprint decides who to notify, how, and when (quiet hours).
+blueprint:
+  name: "Surveillance fenêtre — Notifications (v1.0.0)"
+  description: >
+    Envoie les notifications de l'intégration Window Airing.
+    Une seule instance suffit pour toute la maison : le blueprint écoute les
+    événements émis par l'intégration et route les alertes vers votre service
+    notify, avec des heures de silence optionnelles.
+
+    Deux types d'alerte :
+      - "airing" : le delta intérieur/extérieur ne justifie plus l'ouverture ;
+      - "rain"   : une fenêtre est ouverte alors qu'il pleut.
+  domain: automation
+  author: Elwin
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    notification_target:
+      name: Service de notification
+      description: >
+        Service notify complet (incluant "notify."), ex.
+        notify.group_de_notification_les_cheris
+      default: "notify.group_de_notification_les_cheris"
+      selector:
+        text:
+    alerter_aeration:
+      name: Notifier les alertes d'aération ?
+      default: true
+      selector:
+        boolean:
+    alerter_pluie:
+      name: Notifier les alertes de pluie ?
+      default: true
+      selector:
+        boolean:
+    utiliser_heures_silence:
+      name: Utiliser des heures de silence ?
+      description: >
+        Si activé, aucune notification n'est envoyée entre l'heure de début et
+        l'heure de fin ci-dessous.
+      default: false
+      selector:
+        boolean:
+    silence_debut:
+      name: Début des heures de silence
+      default: "22:00:00"
+      selector:
+        time:
+    silence_fin:
+      name: Fin des heures de silence
+      default: "07:00:00"
+      selector:
+        time:
+# ─────────────────────────────────────────────────────────────────────────────
+variables:
+  v_alerter_aeration: !input alerter_aeration
+  v_alerter_pluie: !input alerter_pluie
+  v_silence_on: !input utiliser_heures_silence
+  v_silence_debut: !input silence_debut
+  v_silence_fin: !input silence_fin
+  notification_target: !input notification_target
+# ─────────────────────────────────────────────────────────────────────────────
+triggers:
+  - trigger: event
+    event_type: window_airing_alert
+conditions:
+  # Type enabled?
+  - condition: template
+    value_template: >
+      {% set t = trigger.event.data.type %}
+      {{ (t == 'airing' and v_alerter_aeration)
+         or (t == 'rain' and v_alerter_pluie) }}
+  # Outside quiet hours? Handles windows that cross midnight.
+  - condition: template
+    value_template: >
+      {% if not v_silence_on %}
+        true
+      {% else %}
+        {% set now_t = now().strftime('%H:%M:%S') %}
+        {% set a = v_silence_debut %}
+        {% set b = v_silence_fin %}
+        {% if a <= b %}
+          {{ not (a <= now_t < b) }}
+        {% else %}
+          {{ not (now_t >= a or now_t < b) }}
+        {% endif %}
+      {% endif %}
+# ─────────────────────────────────────────────────────────────────────────────
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.type == 'airing' }}"
+        sequence:
+          - action: "{{ notification_target }}"
+            data:
+              title: "🪟 Ferme la fenêtre — {{ trigger.event.data.area_name }}"
+              message: >
+                Plus utile de laisser ouvert : delta {{ trigger.event.data.delta }}°C
+                (intérieur {{ trigger.event.data.indoor }}°C /
+                extérieur {{ trigger.event.data.outdoor }}°C)
+                {%- if trigger.event.data.windows | count > 1 %}
+                — ouverte(s) : {{ trigger.event.data.windows | join(', ') }}
+                {%- endif %}
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.type == 'rain' }}"
+        sequence:
+          - action: "{{ notification_target }}"
+            data:
+              title: "🌧️ Fenêtre ouverte sous la pluie — {{ trigger.event.data.area_name }}"
+              message: >
+                Il pleut et la pièce est ouverte
+                {%- if trigger.event.data.windows | count > 0 %}
+                 — ouverte(s) : {{ trigger.event.data.windows | join(', ') }}
+                {%- endif %}. Pense à fermer.
+mode: queued
+max: 20
