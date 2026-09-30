@@ -25,6 +25,7 @@ from .const import (
     ALERT_AIRING,
     ALERT_RAIN,
     CLIMATE_OFF_STATES,
+    CLIMATE_RESTORE_ATTRS,
     CONF_AREA,
     CONF_DEVICE_CLASSES,
     CONF_EXCLUDE_ENTITIES,
@@ -51,6 +52,7 @@ from .const import (
     DEFAULT_WEATHER_RAIN_STATES,
     DOMAIN,
     EVENT_ALERT,
+    STARTUP_GRACE,
     TREND_MIN_SAMPLES,
     TREND_RISING_SLOPE,
     TREND_WINDOW,
@@ -84,6 +86,13 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         self._airing_sent = False
         self._rain_sent = False
         self._clim_memorized = False
+        # Per-climate snapshot taken before turning it off, restored on close:
+        # {entity_id: {"hvac_mode": ..., "temperature": ..., ...}}.
+        self._clim_saved: dict[str, dict] = {}
+
+        # Monotonic time of setup: during STARTUP_GRACE, no action is taken
+        # while window states are not yet known (HA reboot).
+        self._setup_ts = time.monotonic()
 
         # Live notify delay (seconds), driven by the per-room `number` entity,
         # which restores its own stored value on start.
@@ -137,6 +146,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             self._airing_sent = stored.get("airing_sent", False)
             self._rain_sent = stored.get("rain_sent", False)
             self._clim_memorized = stored.get("clim_memorized", False)
+            self._clim_saved = stored.get("clim_saved", {}) or {}
 
         self._discover()
         self._subscribe()
@@ -162,6 +172,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 "airing_sent": self._airing_sent,
                 "rain_sent": self._rain_sent,
                 "clim_memorized": self._clim_memorized,
+                "clim_saved": self._clim_saved,
             }
         )
 
@@ -370,6 +381,24 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             names.append(state.name if state else e)
         return names
 
+    def _states_ready(self) -> bool:
+        """False while HA is booting and window states are not known yet.
+
+        Acting on a half-loaded state machine would read every window as
+        closed and restore (then forget) the memorized climate state. After
+        STARTUP_GRACE, unavailable windows are treated as closed again so a
+        dead sensor cannot block the room forever.
+        """
+        if not self.hass.is_running:
+            return False
+        if time.monotonic() - self._setup_ts >= STARTUP_GRACE:
+            return True
+        for e in self.windows:
+            st = self.hass.states.get(e)
+            if st is None or st.state in ("unavailable", "unknown"):
+                return False
+        return True
+
     # ── main evaluation ──────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
         indoor = self._indoor_avg()
@@ -407,6 +436,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             "trend_rising": self._trend_rising(),
             "raining": self._is_raining(),
             "open_names": self._open_names(),
+            "open_ids": open_windows,
         }
         # Distinct reasons airing is no longer useful (drives the message).
         data["airing_reasons"] = self._airing_reasons(data)
@@ -430,28 +460,81 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             reasons.append("trend_rising")          # room warming despite open
         return reasons
 
+    def _snapshot_climate(self, entity_id: str) -> dict | None:
+        """Capture what is needed to put a running climate back as it was."""
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in CLIMATE_OFF_STATES:
+            return None
+        snap = {"hvac_mode": state.state}
+        for attr in CLIMATE_RESTORE_ATTRS:
+            value = state.attributes.get(attr)
+            if value is not None:
+                snap[attr] = value
+        return snap
+
+    async def _restore_climate(self, entity_id: str, snap: dict) -> None:
+        """Restore a climate from its snapshot (mode first, then setpoints)."""
+        calls: list[tuple[str, dict]] = [
+            ("set_hvac_mode", {"hvac_mode": snap["hvac_mode"]}),
+        ]
+        temps = {
+            k: snap[k]
+            for k in ("temperature", "target_temp_low", "target_temp_high")
+            if k in snap
+        }
+        if temps:
+            calls.append(("set_temperature", temps))
+        for attr in ("fan_mode", "preset_mode", "swing_mode"):
+            if attr in snap:
+                calls.append((f"set_{attr}", {attr: snap[attr]}))
+        for service, extra in calls:
+            try:
+                await self.hass.services.async_call(
+                    "climate", service,
+                    {"entity_id": entity_id, **extra}, blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001 - best effort per attribute
+                _LOGGER.warning(
+                    "%s: climate.%s on %s failed: %s",
+                    self.name, service, entity_id, err,
+                )
+
     async def _evaluate_and_act(self, data: dict) -> None:
+        # HA just rebooted and window states are not loaded yet: do nothing,
+        # the persisted memory is kept until states are trustworthy.
+        if not self._states_ready():
+            _LOGGER.debug("%s: states not ready, skipping evaluation", self.name)
+            return
+
         dirty = False
 
         # ── Climate control (deterministic action; stays in the integration) ─
         if self._opt(CONF_MANAGE_CLIM, False) and self.climates:
-            clim_running = any(
-                self.hass.states.get(c)
-                and self.hass.states.get(c).state not in CLIMATE_OFF_STATES
-                for c in self.climates
-            )
-            if data["open_delayed_clim"] and not self._clim_memorized and clim_running:
-                await self.hass.services.async_call(
-                    "climate", "turn_off",
-                    {"entity_id": self.climates}, blocking=False,
-                )
-                self._clim_memorized = True
-                dirty = True
+            if data["open_delayed_clim"] and not self._clim_memorized:
+                saved = {
+                    c: snap
+                    for c in self.climates
+                    if (snap := self._snapshot_climate(c)) is not None
+                }
+                if saved:
+                    await self.hass.services.async_call(
+                        "climate", "turn_off",
+                        {"entity_id": list(saved)}, blocking=False,
+                    )
+                    self._clim_saved = saved
+                    self._clim_memorized = True
+                    dirty = True
             elif data["open_count"] == 0 and self._clim_memorized:
-                await self.hass.services.async_call(
-                    "climate", "turn_on",
-                    {"entity_id": self.climates}, blocking=False,
-                )
+                if self._clim_saved:
+                    for c, snap in self._clim_saved.items():
+                        await self._restore_climate(c, snap)
+                else:
+                    # Legacy store (no snapshot): fall back to a plain turn_on.
+                    await self.hass.services.async_call(
+                        "climate", "turn_on",
+                        {"entity_id": self.climates}, blocking=False,
+                    )
+                self._clim_saved = {}
                 self._clim_memorized = False
                 dirty = True
 
@@ -495,6 +578,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 "indoor": data["indoor"],
                 "outdoor": data["outdoor"],
                 "windows": data["open_names"],
+                "window_ids": data["open_ids"],
                 "reasons": data.get("airing_reasons", []),
             },
         )

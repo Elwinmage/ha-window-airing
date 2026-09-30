@@ -71,3 +71,15 @@ ALERT_RAIN = "rain"                     # window open while raining
 
 # States that mean "not running" for a climate entity.
 CLIMATE_OFF_STATES = ("off", "unavailable", "unknown")
+# Climate attributes saved before turning it off, restored on close.
+CLIMATE_RESTORE_ATTRS = (
+    "temperature",
+    "target_temp_low",
+    "target_temp_high",
+    "fan_mode",
+    "preset_mode",
+    "swing_mode",
+)
+# After an HA reboot, wait up to this long (s) for window states to be known
+# before acting; past it, unavailable windows are treated as closed.
+STARTUP_GRACE = 600

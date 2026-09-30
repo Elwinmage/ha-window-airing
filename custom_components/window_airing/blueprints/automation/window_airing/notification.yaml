@@ -1,10 +1,10 @@
-# Version: 1.1.0
+# Version: 1.2.0
 # Bundled with the Window Airing integration. It appears automatically in the
 # blueprint list under "Window Airing". One instance handles the whole home:
 # the integration fires `window_airing_alert` events (type "airing" or "rain")
 # and this blueprint decides who to notify, how, and when (quiet hours).
 blueprint:
-  name: "Surveillance fenêtre — Notifications (v1.1.0)"
+  name: "Surveillance fenêtre — Notifications (v1.2.0)"
   description: >
     Envoie les notifications de l'intégration Window Airing.
     Une seule instance suffit pour toute la maison : le blueprint écoute les
@@ -57,6 +57,9 @@ blueprint:
         time:
 # ─────────────────────────────────────────────────────────────────────────────
 variables:
+  # Room name, with a fallback on the area id if the name is missing.
+  v_piece: >
+    {{ trigger.event.data.area_name | default(trigger.event.data.area_id, true) }}
   v_alerter_aeration: !input alerter_aeration
   v_alerter_pluie: !input alerter_pluie
   v_silence_on: !input utiliser_heures_silence
@@ -98,8 +101,9 @@ actions:
         sequence:
           - action: "{{ notification_target }}"
             data:
-              title: "🪟 Ferme la fenêtre — {{ trigger.event.data.area_name }}"
+              title: "🪟 {{ v_piece }} : ferme la fenêtre"
               message: >
+                [{{ v_piece }}]
                 {% set labels = {
                   'outdoor_warmer': "il fait plus chaud dehors que dedans",
                   'delta_low': "l'écart intérieur/extérieur est devenu faible",
@@ -122,9 +126,9 @@ actions:
         sequence:
           - action: "{{ notification_target }}"
             data:
-              title: "🌧️ Fenêtre ouverte sous la pluie — {{ trigger.event.data.area_name }}"
+              title: "🌧️ {{ v_piece }} : fenêtre ouverte sous la pluie"
               message: >
-                Il pleut et la pièce est ouverte
+                Il pleut et une fenêtre est ouverte dans : {{ v_piece }}
                 {%- if trigger.event.data.windows | count > 0 %}
                  — ouverte(s) : {{ trigger.event.data.windows | join(', ') }}
                 {%- endif %}. Pense à fermer.
