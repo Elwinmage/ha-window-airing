@@ -44,6 +44,97 @@ from .const import (
     DOMAIN,
 )
 
+# Labels of the read-only recap shown at the top of the options form. Built in
+# Python (not strings.json) because it is injected as a description placeholder.
+_RECAP_LABELS = {
+    "en": {
+        "windows": "Window contacts",
+        "indoor_sensors": "Indoor temperature",
+        "climates": "Climate",
+        "exterior_temp": "Outdoor temperature",
+        "rain_sensor": "Rain sensor",
+        "weather": "Weather",
+        "excluded": "Excluded from discovery",
+        "auto": "auto",
+        "override": "override",
+        "none": "none",
+        "sep": ": ",
+        "excluded_entity": "excluded entity",
+        "excluded_platform": "excluded integration",
+        "not_loaded": "The room is not loaded: the discovered entities cannot be shown.",
+    },
+    "fr": {
+        "windows": "Contacts de fenêtre",
+        "indoor_sensors": "Température intérieure",
+        "climates": "Climatisation",
+        "exterior_temp": "Température extérieure",
+        "rain_sensor": "Capteur de pluie",
+        "weather": "Météo",
+        "excluded": "Exclus de la découverte",
+        "auto": "auto",
+        "override": "override",
+        "none": "aucun",
+        "sep": " : ",
+        "excluded_entity": "entité exclue",
+        "excluded_platform": "intégration exclue",
+        "not_loaded": "La pièce n'est pas chargée : impossible d'afficher les entités découvertes.",
+    },
+}
+
+
+def _recap_labels(hass) -> dict[str, str]:
+    lang = (hass.config.language or "en").split("-")[0].lower()
+    return _RECAP_LABELS.get(lang, _RECAP_LABELS["en"])
+
+
+def _entity_label(hass, entity_id: str) -> str:
+    """`entity_id` followed by its friendly name when it differs."""
+    state = hass.states.get(entity_id)
+    name = state.name if state else None
+    if name and name != entity_id:
+        return f"`{entity_id}` ({name})"
+    return f"`{entity_id}`"
+
+
+def _discovery_recap(hass, entry: ConfigEntry) -> str:
+    """Markdown recap of the entities the room currently uses.
+
+    Reflects the saved configuration (the entry reloads on save), not the
+    values being edited in the form.
+    """
+    labels = _recap_labels(hass)
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is None:
+        return f"_{labels['not_loaded']}_"
+
+    summary = coordinator.discovery_summary()
+    lines: list[str] = []
+
+    for key in ("windows", "indoor_sensors", "climates"):
+        source = labels[summary[f"{key}_source"]]
+        ids = summary[key]
+        values = (
+            ", ".join(_entity_label(hass, e) for e in ids) if ids else labels["none"]
+        )
+        lines.append(f"- **{labels[key]}** ({source}){labels['sep']}{values}")
+
+    for key in ("exterior_temp", "rain_sensor", "weather"):
+        eid = summary[key]
+        value = _entity_label(hass, eid) if eid else labels["none"]
+        lines.append(f"- **{labels[key]}**{labels['sep']}{value}")
+
+    if summary["excluded"]:
+        items = []
+        for x in summary["excluded"]:
+            reason = labels.get(x["reason"], x["reason"])
+            if x["reason"] == "excluded_platform" and x.get("platform"):
+                reason = f"{reason} `{x['platform']}`"
+            items.append(f"`{x['entity_id']}` ({reason})")
+        lines.append(f"- **{labels['excluded']}**{labels['sep']}{', '.join(items)}")
+
+    return "\n".join(lines)
+
+
 # A rain source can be a numeric sensor (mm) or a binary_sensor.
 _RAIN_SELECTOR = selector.EntitySelector(
     selector.EntitySelectorConfig(domain=["binary_sensor", "sensor"])
@@ -278,4 +369,7 @@ class WindowAiringOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=_options_schema(current, extra_platforms),
+            description_placeholders={
+                "discovered": _discovery_recap(self.hass, self.entry),
+            },
         )

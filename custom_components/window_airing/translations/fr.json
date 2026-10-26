@@ -19,6 +19,7 @@
     "step": {
       "init": {
         "title": "Surveillance fenêtre — réglages",
+        "description": "Entités actuellement utilisées par cette pièce (configuration enregistrée) :\n\n{discovered}\n\nLaissez les overrides vides pour garder la découverte automatique.",
         "data": {
           "exterior_temp": "Capteur température extérieure",
           "device_classes": "device_class des contacts de fenêtre",
@@ -42,16 +43,31 @@
   },
   "entity": {
     "sensor": {
-      "delta": { "name": "Delta intérieur/extérieur" },
-      "indoor": { "name": "Température intérieure (moy.)" }
+      "delta": {
+        "name": "Delta intérieur/extérieur"
+      },
+      "indoor": {
+        "name": "Température intérieure (moy.)"
+      },
+      "sources": {
+        "name": "Entités surveillées"
+      }
     },
     "binary_sensor": {
-      "airing_recommended": { "name": "Aération plus utile" },
-      "open_in_rain": { "name": "Ouvert sous la pluie" },
-      "trend_rising": { "name": "Température en hausse" }
+      "airing_recommended": {
+        "name": "Aération plus utile"
+      },
+      "open_in_rain": {
+        "name": "Ouvert sous la pluie"
+      },
+      "trend_rising": {
+        "name": "Température en hausse"
+      }
     },
     "number": {
-      "notify_delay": { "name": "Délai avant notification" }
+      "notify_delay": {
+        "name": "Délai avant notification"
+      }
     }
   }
 }

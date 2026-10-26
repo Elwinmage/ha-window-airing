@@ -81,6 +81,16 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         self.windows: list[str] = []
         self.indoor_sensors: list[str] = []
         self.climates: list[str] = []
+        # How each category was resolved: "auto" (area discovery) or "override".
+        self.sources: dict[str, str] = {
+            "windows": "auto",
+            "indoor_sensors": "auto",
+            "climates": "auto",
+        }
+        # Entities of the area that discovery dropped, with the reason:
+        # [{"entity_id": ..., "reason": "excluded_entity" | "excluded_platform",
+        #   "platform": ...}].
+        self.excluded: list[dict] = []
 
         # Persisted state memory (replaces the old input_booleans).
         self._airing_sent = False
@@ -221,14 +231,28 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         )
         exclude_entities = set(self._opt(CONF_EXCLUDE_ENTITIES, []))
 
+        in_area = self._entities_in_area()
+        excluded: list[dict] = []
+
         # Explicit exclusions drop out of every category up front.
-        entities = [
-            e for e in self._entities_in_area() if e not in exclude_entities
-        ]
+        entities = []
+        for e in in_area:
+            if e in exclude_entities:
+                excluded.append(
+                    {
+                        "entity_id": e,
+                        "reason": "excluded_entity",
+                        "platform": self._platform_of(e),
+                    }
+                )
+            else:
+                entities.append(e)
 
         if override_w:
+            self.sources["windows"] = "override"
             self.windows = list(override_w)
         else:
+            self.sources["windows"] = "auto"
             self.windows = [
                 e
                 for e in entities
@@ -237,28 +261,69 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             ]
 
         if override_i:
+            self.sources["indoor_sensors"] = "override"
             self.indoor_sensors = [override_i]
         else:
+            self.sources["indoor_sensors"] = "auto"
             # Keep physical temperature sensors only: computed/aggregate
             # platforms (template deltas, derivatives, statistics...) are
             # dropped even though they carry device_class temperature.
-            self.indoor_sensors = [
-                e
-                for e in entities
-                if e.startswith("sensor.")
-                and self._device_class(e) == "temperature"
-                and self._platform_of(e) not in exclude_platforms
-            ]
+            self.indoor_sensors = []
+            for e in entities:
+                if not e.startswith("sensor.") or self._device_class(e) != "temperature":
+                    continue
+                platform = self._platform_of(e)
+                if platform in exclude_platforms:
+                    excluded.append(
+                        {
+                            "entity_id": e,
+                            "reason": "excluded_platform",
+                            "platform": platform,
+                        }
+                    )
+                else:
+                    self.indoor_sensors.append(e)
 
         if override_c:
+            self.sources["climates"] = "override"
             self.climates = list(override_c)
         else:
+            self.sources["climates"] = "auto"
             self.climates = [e for e in entities if e.startswith("climate.")]
+
+        self.excluded = excluded
 
         _LOGGER.debug(
             "%s discovery: windows=%s indoor=%s clim=%s",
             self.name, self.windows, self.indoor_sensors, self.climates,
         )
+
+    def discovery_summary(self) -> dict:
+        """Every entity this room uses, grouped by role.
+
+        Single source of truth for the `sources` diagnostic sensor and the
+        read-only recap shown at the top of the options form.
+        """
+        cfg = self._cfg
+        return {
+            "windows": list(self.windows),
+            "windows_source": self.sources["windows"],
+            "indoor_sensors": list(self.indoor_sensors),
+            "indoor_sensors_source": self.sources["indoor_sensors"],
+            "climates": list(self.climates),
+            "climates_source": self.sources["climates"],
+            "exterior_temp": cfg.get(CONF_EXTERIOR_TEMP),
+            "rain_sensor": cfg.get(CONF_RAIN_SENSOR),
+            "weather": cfg.get(CONF_WEATHER),
+            "excluded": [dict(x) for x in self.excluded],
+        }
+
+    def used_entities(self) -> list[str]:
+        """Flat, de-duplicated list of the entity ids this room relies on."""
+        s = self.discovery_summary()
+        ids = [*s["windows"], *s["indoor_sensors"], *s["climates"]]
+        ids += [e for e in (s["exterior_temp"], s["rain_sensor"], s["weather"]) if e]
+        return list(dict.fromkeys(ids))
 
     # ── subscriptions ────────────────────────────────────────────────────────
     @callback

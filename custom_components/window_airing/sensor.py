@@ -1,4 +1,4 @@
-"""Sensor entities: indoor/outdoor delta and indoor average temperature."""
+"""Sensor entities: indoor/outdoor delta, indoor average and monitored sources."""
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
@@ -27,6 +27,7 @@ async def async_setup_entry(
         [
             WindowAiringDeltaSensor(coordinator),
             WindowAiringIndoorSensor(coordinator),
+            WindowAiringSourcesSensor(coordinator),
         ]
     )
 
@@ -88,3 +89,54 @@ class WindowAiringIndoorSensor(_Base):
     @property
     def extra_state_attributes(self):
         return {"sensors": self.coordinator.indoor_sensors}
+
+
+# Attributes of the sources sensor: lists of entity ids that rarely change,
+# kept out of the recorder so they do not bloat the database.
+_SOURCES_ATTRS = frozenset(
+    {
+        "windows",
+        "windows_source",
+        "indoor_sensors",
+        "indoor_sensors_source",
+        "climates",
+        "climates_source",
+        "exterior_temp",
+        "rain_sensor",
+        "weather",
+        "excluded",
+        "area_id",
+    }
+)
+
+
+class WindowAiringSourcesSensor(CoordinatorEntity[WindowAiringCoordinator], SensorEntity):
+    """Diagnostic: how many entities the room relies on, listed in attributes.
+
+    State = number of distinct entities used (windows, indoor sensors,
+    climates, outdoor/rain/weather sources). Attributes give the lists per
+    role, whether each role comes from auto-discovery or an override, and the
+    area entities that discovery dropped (with the reason).
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "sources"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:format-list-checks"
+    _unrecorded_attributes = _SOURCES_ATTRS
+
+    def __init__(self, coordinator: WindowAiringCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_sources"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.used_entities())
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "area_id": self.coordinator.area_id,
+            **self.coordinator.discovery_summary(),
+        }

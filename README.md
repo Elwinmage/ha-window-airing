@@ -22,6 +22,7 @@ The integration does the **mechanism**, a bundled blueprint does the
     de-duplicated on the edge.
   - Exposes entities: delta sensor, indoor-average sensor, and binary sensors
     *airing recommended*, *open in rain*, *temperature rising*.
+  - Lists the entities each room relies on (see *Monitored entities* below).
 - **Notification blueprint** (bundled, appears under "Window Airing")
   - Listens to the events and routes them to your `notify.*` service, with
     optional quiet hours. One instance for the whole home.
@@ -37,6 +38,20 @@ This split keeps user policy (who/how/when to notify) out of the integration.
    open delay, trend, climate, rain, and overrides.
 4. Settings → Automations → **Create from blueprint** → *Surveillance fenêtre
    — Notifications*. Set your notify service (and quiet hours).
+
+## Monitored entities
+
+Each room shows which entities it actually uses, in two places fed by the same
+discovery result:
+
+- **Diagnostic sensor** *Monitored entities* (e.g. `sensor.<room>_monitored_entities`) — state = number of
+  distinct entities used; attributes `windows`, `indoor_sensors`, `climates`
+  (each with a `*_source`: `auto` or `override`), `exterior_temp`,
+  `rain_sensor`, `weather`, and `excluded` (area entities dropped by
+  discovery, with reason `excluded_entity` or `excluded_platform`). These
+  attributes are not recorded in history.
+- **Options form** (*Configure*) — a read-only recap at the top of the form.
+  It reflects the saved configuration; save to see the effect of a change.
 
 ## Notes / to validate
 

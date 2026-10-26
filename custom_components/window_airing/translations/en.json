@@ -19,6 +19,7 @@
     "step": {
       "init": {
         "title": "Window Airing — settings",
+        "description": "Entities currently used by this room (saved configuration):\n\n{discovered}\n\nLeave the overrides empty to keep auto-discovery.",
         "data": {
           "exterior_temp": "Outdoor temperature sensor",
           "device_classes": "Window contact device classes",
@@ -42,16 +43,31 @@
   },
   "entity": {
     "sensor": {
-      "delta": { "name": "Delta indoor/outdoor" },
-      "indoor": { "name": "Indoor temperature (avg)" }
+      "delta": {
+        "name": "Delta indoor/outdoor"
+      },
+      "indoor": {
+        "name": "Indoor temperature (avg)"
+      },
+      "sources": {
+        "name": "Monitored entities"
+      }
     },
     "binary_sensor": {
-      "airing_recommended": { "name": "Airing no longer useful" },
-      "open_in_rain": { "name": "Open while raining" },
-      "trend_rising": { "name": "Temperature rising" }
+      "airing_recommended": {
+        "name": "Airing no longer useful"
+      },
+      "open_in_rain": {
+        "name": "Open while raining"
+      },
+      "trend_rising": {
+        "name": "Temperature rising"
+      }
     },
     "number": {
-      "notify_delay": { "name": "Notify delay" }
+      "notify_delay": {
+        "name": "Notify delay"
+      }
     }
   }
 }
