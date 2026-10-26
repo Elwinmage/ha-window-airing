@@ -142,13 +142,23 @@ _RAIN_SELECTOR = selector.EntitySelector(
 _TEMP_SELECTOR = selector.EntitySelector(
     selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
 )
+# Outdoor source: a temperature sensor, or a weather entity (e.g. Met.no) whose
+# current `temperature` attribute is used when the home has no outdoor probe.
+_OUTDOOR_SELECTOR = selector.EntitySelector(
+    selector.EntitySelectorConfig(
+        filter=[
+            {"domain": "sensor", "device_class": "temperature"},
+            {"domain": "weather"},
+        ]
+    )
+)
 
-# Config step: identity + the two live sensors. Everything else is tuned later.
+# Config step: identity + the two live sources. Everything else is tuned later.
 # The rain sensor is optional (no default → the key is simply omitted if empty).
 CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_AREA): selector.AreaSelector(),
-        vol.Required(CONF_EXTERIOR_TEMP): _TEMP_SELECTOR,
+        vol.Required(CONF_EXTERIOR_TEMP): _OUTDOOR_SELECTOR,
         vol.Optional(CONF_RAIN_SENSOR): _RAIN_SELECTOR,
     }
 )
@@ -213,7 +223,7 @@ def _options_schema(current: dict[str, Any], extra_platforms: list[str]) -> vol.
             # ── The two live sensors (editable after creation) ───────────────
             vol.Required(
                 CONF_EXTERIOR_TEMP, default=current.get(CONF_EXTERIOR_TEMP)
-            ): _TEMP_SELECTOR,
+            ): _OUTDOOR_SELECTOR,
             _optional_entity(CONF_RAIN_SENSOR, current): _RAIN_SELECTOR,
             vol.Optional(
                 CONF_RAIN_MM_THRESHOLD,

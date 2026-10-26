@@ -395,6 +395,29 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denom
         return slope > TREND_RISING_SLOPE
 
+    # ── outdoor temperature ──────────────────────────────────────────────────
+    def _outdoor_temp(self) -> float | None:
+        """Outdoor temperature from a temperature sensor or a weather entity.
+
+        A `weather.*` entity (e.g. Met.no) is read from its current
+        `temperature` attribute, so a home without an outdoor probe can still
+        compute the delta. Its value is the provider's current/now-cast
+        temperature and refreshes at the provider's pace (hourly for Met.no).
+        """
+        entity_id = self.entry.data[CONF_EXTERIOR_TEMP]
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return None
+        raw = (
+            state.attributes.get("temperature")
+            if entity_id.startswith("weather.")
+            else state.state
+        )
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return None
+
     # ── rain detection ───────────────────────────────────────────────────────
     def _is_raining(self) -> bool:
         rain_sensor = self._opt(CONF_RAIN_SENSOR, None)
@@ -469,11 +492,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         indoor = self._indoor_avg()
         self._sample_trend(indoor)
 
-        outdoor_state = self.hass.states.get(self.entry.data[CONF_EXTERIOR_TEMP])
-        try:
-            outdoor = float(outdoor_state.state) if outdoor_state else None
-        except (ValueError, TypeError):
-            outdoor = None
+        outdoor = self._outdoor_temp()
 
         delta = None
         if indoor is not None and outdoor is not None:

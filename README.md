@@ -3,7 +3,8 @@
 Home Assistant integration that watches a **room** and tells you when it is no
 longer useful to keep a window open — plus optional climate cut-off and a
 rain alert. Everything is discovered from the room; you only pick the area and
-the shared outdoor temperature sensor.
+the shared outdoor temperature source (a sensor, or a `weather` entity such
+as Met.no when there is no outdoor probe).
 
 ## Architecture
 
@@ -58,6 +59,11 @@ discovery result:
 - **Shelly BLU DoorWindow** `device_class`: check it in Developer tools →
   States. Adjust the "device_class" option if it is not window/door/opening.
 - If a room has an irrelevant temperature sensor, use the indoor override.
+- **No outdoor probe?** Pick a `weather` entity (e.g. Met.no) as the outdoor
+  source: its current `temperature` attribute is used. It refreshes at the
+  provider's pace (about hourly for Met.no) and is a regional estimate, so the
+  delta is coarser than with a real probe — consider a slightly higher
+  threshold.
 - The `open_delay` gates both the climate cut-off and the airing alert.
 - Rain uses the rain `binary_sensor` and/or the `weather` entity's current
   state. Forecast look-ahead (`weather.get_forecasts`) is a possible addition.
