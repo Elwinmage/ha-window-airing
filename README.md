@@ -13,7 +13,8 @@ The integration does the **mechanism**, a bundled blueprint does the
 
 - **Integration** (`custom_components/window_airing/`)
   - Discovers, per configured area: window contacts (by `device_class`),
-    temperature sensors (averaged) and `climate` entities.
+    temperature sensors (averaged, falling back to the climate's
+    `current_temperature`) and `climate` entities.
   - Computes the indoor/outdoor delta and an indoor temperature **trend**
     (replaces the manual Derivative helper).
   - Keeps its own **persisted state** (alert-sent, clim-memorised) — no
@@ -58,7 +59,11 @@ discovery result:
 
 - **Shelly BLU DoorWindow** `device_class`: check it in Developer tools →
   States. Adjust the "device_class" option if it is not window/door/opening.
-- If a room has an irrelevant temperature sensor, use the indoor override.
+- If a room has an irrelevant temperature sensor, use the indoor override
+  (a temperature sensor or a `climate` entity).
+- **No indoor probe?** When discovery finds no temperature sensor in the room,
+  the climate's `current_temperature` is used instead (source shown as
+  *from climate*). It is measured at the unit, so it can be biased.
 - **No outdoor probe?** Pick a `weather` entity (e.g. Met.no) as the outdoor
   source: its current `temperature` attribute is used. It refreshes at the
   provider's pace (about hourly for Met.no) and is a regional estimate, so the

@@ -35,7 +35,7 @@
           "exclude_platforms": "Intégrations de température à exclure (ex. template, redsea)",
           "exclude_entities": "Entités exclues (toute la découverte)",
           "override_windows": "Override — contacts de fenêtre",
-          "override_indoor": "Override — température intérieure",
+          "override_indoor": "Override — température intérieure (capteur ou climatisation)",
           "override_clim": "Override — climatisation"
         }
       }

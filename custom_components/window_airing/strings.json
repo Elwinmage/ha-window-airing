@@ -35,7 +35,7 @@
           "exclude_platforms": "Temperature integrations to exclude",
           "exclude_entities": "Excluded entities (all discovery)",
           "override_windows": "Override — window contacts",
-          "override_indoor": "Override — indoor temperature",
+          "override_indoor": "Override — indoor temperature (sensor or climate)",
           "override_clim": "Override — climate"
         }
       }

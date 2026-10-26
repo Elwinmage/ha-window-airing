@@ -291,6 +291,13 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             self.sources["climates"] = "auto"
             self.climates = [e for e in entities if e.startswith("climate.")]
 
+        # Fallback: no physical indoor probe in the room → use the climate's
+        # own `current_temperature` (its built-in sensor). Biased towards the
+        # unit's location, but far better than no delta at all.
+        if not self.indoor_sensors and self.climates:
+            self.sources["indoor_sensors"] = "climate"
+            self.indoor_sensors = list(self.climates)
+
         self.excluded = excluded
 
         _LOGGER.debug(
@@ -362,10 +369,17 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         vals: list[float] = []
         for e in self.indoor_sensors:
             state = self.hass.states.get(e)
-            if state is None:
+            if state is None or state.state in ("unavailable", "unknown"):
                 continue
+            # A climate entity reports the room temperature as an attribute,
+            # even while it is off; a sensor reports it as its state.
+            raw = (
+                state.attributes.get("current_temperature")
+                if e.startswith("climate.")
+                else state.state
+            )
             try:
-                vals.append(float(state.state))
+                vals.append(float(raw))
             except (ValueError, TypeError):
                 continue
         return round(sum(vals) / len(vals), 2) if vals else None

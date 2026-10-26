@@ -57,6 +57,7 @@ _RECAP_LABELS = {
         "excluded": "Excluded from discovery",
         "auto": "auto",
         "override": "override",
+        "climate": "from climate",
         "none": "none",
         "sep": ": ",
         "excluded_entity": "excluded entity",
@@ -73,6 +74,7 @@ _RECAP_LABELS = {
         "excluded": "Exclus de la découverte",
         "auto": "auto",
         "override": "override",
+        "climate": "via climatisation",
         "none": "aucun",
         "sep": " : ",
         "excluded_entity": "entité exclue",
@@ -141,6 +143,16 @@ _RAIN_SELECTOR = selector.EntitySelector(
 )
 _TEMP_SELECTOR = selector.EntitySelector(
     selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+)
+# Indoor override: a temperature sensor, or a climate entity whose
+# `current_temperature` attribute is used.
+_INDOOR_SELECTOR = selector.EntitySelector(
+    selector.EntitySelectorConfig(
+        filter=[
+            {"domain": "sensor", "device_class": "temperature"},
+            {"domain": "climate"},
+        ]
+    )
 )
 # Outdoor source: a temperature sensor, or a weather entity (e.g. Met.no) whose
 # current `temperature` attribute is used when the home has no outdoor probe.
@@ -310,7 +322,7 @@ def _options_schema(current: dict[str, Any], extra_platforms: list[str]) -> vol.
                     domain=["binary_sensor", "input_boolean"], multiple=True
                 )
             ),
-            _optional_entity(CONF_OVERRIDE_INDOOR, current): _TEMP_SELECTOR,
+            _optional_entity(CONF_OVERRIDE_INDOOR, current): _INDOOR_SELECTOR,
             vol.Optional(
                 CONF_OVERRIDE_CLIM, default=num(CONF_OVERRIDE_CLIM, [])
             ): selector.EntitySelector(
