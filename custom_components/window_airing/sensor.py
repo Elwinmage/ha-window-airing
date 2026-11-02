@@ -1,4 +1,4 @@
-"""Sensor entities: indoor/outdoor delta, indoor average and monitored sources."""
+"""Sensor entities: room delta, indoor average, sources; house heating time."""
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
@@ -7,14 +7,15 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, is_house_entry
 from .coordinator import WindowAiringCoordinator
+from .house import WindowAiringHouse
 
 
 async def async_setup_entry(
@@ -22,7 +23,12 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: WindowAiringCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    if is_house_entry(entry):
+        async_add_entities(
+            [HeatingTodaySensor(coordinator), HouseSourcesSensor(coordinator)]
+        )
+        return
     async_add_entities(
         [
             WindowAiringDeltaSensor(coordinator),
@@ -72,6 +78,7 @@ class WindowAiringDeltaSensor(_Base):
             "raining": d.get("raining"),
             "airing": bool(d.get("airing_reasons")),
             "reasons": d.get("airing_reasons", []),
+            "winter": d.get("winter"),
         }
 
 
@@ -140,3 +147,55 @@ class WindowAiringSourcesSensor(CoordinatorEntity[WindowAiringCoordinator], Sens
             "area_id": self.coordinator.area_id,
             **self.coordinator.discovery_summary(),
         }
+
+
+class HeatingTodaySensor(CoordinatorEntity[WindowAiringHouse], SensorEntity):
+    """Diagnostic: heating time today, what the automatic winter switch counts."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "heating_today"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_icon = "mdi:radiator"
+
+    def __init__(self, coordinator: WindowAiringHouse) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_heating_today"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("heating_minutes")
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data
+        return {
+            "heating_now": d.get("heating_now"),
+            "days_without_heating": d.get("idle_days"),
+        }
+
+
+class HouseSourcesSensor(CoordinatorEntity[WindowAiringHouse], SensorEntity):
+    """Diagnostic: the climates the automatic season change relies on."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "sources"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:format-list-checks"
+    _unrecorded_attributes = frozenset({"climates"})
+
+    def __init__(self, coordinator: WindowAiringHouse) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_sources"
+        self._attr_device_info = coordinator.device_info
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.climates)
+
+    @property
+    def extra_state_attributes(self):
+        return {"climates": self.coordinator.climates}

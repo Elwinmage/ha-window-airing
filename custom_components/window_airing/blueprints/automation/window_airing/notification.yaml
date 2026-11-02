@@ -1,19 +1,24 @@
-# Version: 1.2.0
+# Version: 1.3.0
 # Bundled with the Window Airing integration. It appears automatically in the
 # blueprint list under "Window Airing". One instance handles the whole home:
-# the integration fires `window_airing_alert` events (type "airing" or "rain")
+# the integration fires `window_airing_alert` events (type "airing", "rain" or "season")
 # and this blueprint decides who to notify, how, and when (quiet hours).
 blueprint:
-  name: "Surveillance fenêtre — Notifications (v1.2.0)"
+  name: "Surveillance fenêtre — Notifications (v1.3.0)"
   description: >
     Envoie les notifications de l'intégration Window Airing.
     Une seule instance suffit pour toute la maison : le blueprint écoute les
     événements émis par l'intégration et route les alertes vers votre service
     notify, avec des heures de silence optionnelles.
 
-    Deux types d'alerte :
-      - "airing" : le delta intérieur/extérieur ne justifie plus l'ouverture ;
-      - "rain"   : une fenêtre est ouverte alors qu'il pleut.
+    Trois types d'alerte :
+      - "airing" : le delta intérieur/extérieur ne justifie plus l'ouverture,
+        ou, en mode hiver, la fenêtre est ouverte depuis trop longtemps ;
+      - "rain"   : une fenêtre est ouverte alors qu'il pleut ;
+      - "season" : le mode hiver a basculé automatiquement.
+
+    Les alertes du mode hiver et les changements de saison sont envoyés même
+    pendant les heures de silence.
   domain: automation
   author: Elwin
   homeassistant:
@@ -37,11 +42,17 @@ blueprint:
       default: true
       selector:
         boolean:
+    alerter_saison:
+      name: Notifier les changements de saison automatiques ?
+      default: true
+      selector:
+        boolean:
     utiliser_heures_silence:
       name: Utiliser des heures de silence ?
       description: >
         Si activé, aucune notification n'est envoyée entre l'heure de début et
-        l'heure de fin ci-dessous.
+        l'heure de fin ci-dessous, sauf les alertes du mode hiver et les
+        changements de saison.
       default: false
       selector:
         boolean:
@@ -59,13 +70,18 @@ blueprint:
 variables:
   # Room name, with a fallback on the area id if the name is missing.
   v_piece: >
-    {{ trigger.event.data.area_name | default(trigger.event.data.area_id, true) }}
+    {{ trigger.event.data.area_name or trigger.event.data.area_id or '' }}
   v_alerter_aeration: !input alerter_aeration
   v_alerter_pluie: !input alerter_pluie
+  v_alerter_saison: !input alerter_saison
   v_silence_on: !input utiliser_heures_silence
   v_silence_debut: !input silence_debut
   v_silence_fin: !input silence_fin
   notification_target: !input notification_target
+  # Winter alerts and season changes ignore the quiet hours.
+  v_ignore_silence: >
+    {{ trigger.event.data.type == 'season'
+       or (trigger.event.data.winter | default(false)) }}
 # ─────────────────────────────────────────────────────────────────────────────
 triggers:
   - trigger: event
@@ -76,11 +92,12 @@ conditions:
     value_template: >
       {% set t = trigger.event.data.type %}
       {{ (t == 'airing' and v_alerter_aeration)
-         or (t == 'rain' and v_alerter_pluie) }}
+         or (t == 'rain' and v_alerter_pluie)
+         or (t == 'season' and v_alerter_saison) }}
   # Outside quiet hours? Handles windows that cross midnight.
   - condition: template
     value_template: >
-      {% if not v_silence_on %}
+      {% if not v_silence_on or v_ignore_silence %}
         true
       {% else %}
         {% set now_t = now().strftime('%H:%M:%S') %}
@@ -95,6 +112,36 @@ conditions:
 # ─────────────────────────────────────────────────────────────────────────────
 actions:
   - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.event.data.type == 'airing'
+                 and 'max_duration' in (trigger.event.data.reasons | default([])) }}
+        sequence:
+          - action: "{{ notification_target }}"
+            data:
+              title: >
+                ❄️ {{ v_piece }} : ferme la fenêtre{% if
+                trigger.event.data.reminder > 0 %} (rappel {{
+                trigger.event.data.reminder }}){% endif %}
+              message: >
+                {{ trigger.event.data.windows | join(', ') }} :
+                ouverte depuis {{ trigger.event.data.open_minutes }} min.
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.type == 'season' }}"
+        sequence:
+          - action: "{{ notification_target }}"
+            data:
+              title: >
+                {{ '❄️ Mode hiver activé' if trigger.event.data.mode == 'winter'
+                   else '☀️ Mode hiver désactivé' }}
+              message: >
+                {% if trigger.event.data.mode == 'winter' %}
+                Le chauffage a fonctionné {{ trigger.event.data.heating_minutes | round(0) | int }} min aujourd'hui.
+                {% else %}
+                Aucun chauffage depuis {{ trigger.event.data.idle_days }} jours.
+                {% endif %}
       - conditions:
           - condition: template
             value_template: "{{ trigger.event.data.type == 'airing' }}"

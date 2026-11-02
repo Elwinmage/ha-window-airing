@@ -1,8 +1,8 @@
 # Window Airing
 
 Home Assistant integration that watches a **room** and tells you when it is no
-longer useful to keep a window open — plus optional climate cut-off and a
-rain alert. Everything is discovered from the room; you only pick the area and
+longer useful to keep a window open — plus optional climate cut-off, a rain
+alert and a winter mode driven by a maximum open time. Everything is discovered from the room; you only pick the area and
 the shared outdoor temperature source (a sensor, or a `weather` entity such
 as Met.no when there is no outdoor probe).
 
@@ -20,7 +20,7 @@ The integration does the **mechanism**, a bundled blueprint does the
   - Keeps its own **persisted state** (alert-sent, clim-memorised) — no
     `input_boolean` helpers to create.
   - **Acts** on the climate (turn off when open long enough, restore on close).
-  - **Signals** via `window_airing_alert` events (`type: airing | rain`),
+  - **Signals** via `window_airing_alert` events (`type: airing | rain | season`),
     de-duplicated on the edge.
   - Exposes entities: delta sensor, indoor-average sensor, and binary sensors
     *airing recommended*, *open in rain*, *temperature rising*.
@@ -38,8 +38,51 @@ This split keeps user policy (who/how/when to notify) out of the integration.
    Pick a room + the outdoor sensor. Repeat per room.
 3. Tune each room in the integration's **Configure** (options): threshold,
    open delay, trend, climate, rain, and overrides.
-4. Settings → Automations → **Create from blueprint** → *Surveillance fenêtre
+4. Optional: **Add integration** → *Window Airing* → *The house* to get the
+   winter mode (see *Winter mode* below).
+5. Settings → Automations → **Create from blueprint** → *Surveillance fenêtre
    — Notifications*. Set your notify service (and quiet hours).
+
+## Winter mode
+
+The optional **house** entry is unique and shared by all rooms. It adds a
+`Winter mode` switch. Without it, rooms keep the behaviour described above.
+
+| | Summer | Winter |
+|---|---|---|
+| Close alert | Temperature delta and trend, after the notify delay | Open time only, per window |
+| Delay | `Notify delay` of the room | `Maximum open time in winter` of the house (10 min) |
+| Reminders | None | Every 10 min, 3 at most, then silence until the window closes |
+| Climates turned off | All the running ones | Those able to cool (`cool` or `heat_cool` in `hvac_modes`) |
+| Quiet hours | Respected | Ignored |
+
+In winter, **heat-only** devices stay on. Enable *Winter: also turn off
+heat-only devices* in the room options for radiators without their own
+open-window detection. Both seasons still need *Manage climate*. The rain alert
+does not change.
+
+### Automatic season change
+
+Pick the climates to watch in the house entry. With none, the switch only moves
+by hand. Each automatic change fires a `season` event, which the blueprint
+notifies.
+
+- **To winter**: the watched climates heated for 30 min in total during the
+  day. Time is counted once when several heat together, and resets at midnight.
+- **To summer**: 7 full days in a row without heating (`0` disables it).
+- **Months**: automatic winter is only possible from October to March,
+  automatic summer from April to September. Both start months are configurable.
+  The switch works by hand all year round.
+- **Manual priority**: after moving the switch by hand, no automatic change
+  happens until the next day.
+
+Heating is read from `hvac_action`. If a climate does not expose it, its `heat`
+state is used instead: that is only its mode, so such a climate counts as
+heating whenever it is in `heat`, and the return to summer may never trigger.
+
+The diagnostic sensor *Heating time today* shows the counter, with
+`heating_now` and `days_without_heating` as attributes. The switch has `source`
+(`manual` or `auto`) and `changed_at` attributes.
 
 ## Monitored entities
 
@@ -69,6 +112,9 @@ discovery result:
   provider's pace (about hourly for Met.no) and is a regional estimate, so the
   delta is coarser than with a real probe — consider a slightly higher
   threshold.
-- The `open_delay` gates both the climate cut-off and the airing alert.
+- The `open_delay` gates the climate cut-off; notifications use the *Notify
+  delay* entity, or the maximum open time in winter.
+- Opening times are kept across restarts and sensor dropouts: an unavailable
+  contact does not restart the delays.
 - Rain uses the rain `binary_sensor` and/or the `weather` entity's current
   state. Forecast look-ahead (`weather.get_forecasts`) is a possible addition.

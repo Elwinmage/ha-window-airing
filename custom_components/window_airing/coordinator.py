@@ -4,15 +4,16 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
     entity_registry as er,
 )
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
@@ -43,6 +44,9 @@ from .const import (
     CONF_USE_TREND,
     CONF_WEATHER,
     CONF_WEATHER_RAIN_STATES,
+    CONF_WINTER_CUT_HEAT_ONLY,
+    COOLING_MODES,
+    DATA_HOUSE,
     DEFAULT_DEVICE_CLASSES,
     DEFAULT_EXCLUDE_PLATFORMS,
     DEFAULT_NOTIFY_DELAY,
@@ -52,16 +56,18 @@ from .const import (
     DEFAULT_WEATHER_RAIN_STATES,
     DOMAIN,
     EVENT_ALERT,
+    REASON_MAX_DURATION,
+    SIGNAL_SEASON,
     STARTUP_GRACE,
+    STORAGE_VERSION,
     TREND_MIN_SAMPLES,
     TREND_RISING_SLOPE,
     TREND_WINDOW,
     UPDATE_INTERVAL,
+    is_house_entry,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-STORAGE_VERSION = 1
 
 
 class WindowAiringCoordinator(DataUpdateCoordinator):
@@ -99,6 +105,12 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         # Per-climate snapshot taken before turning it off, restored on close:
         # {entity_id: {"hvac_mode": ..., "temperature": ..., ...}}.
         self._clim_saved: dict[str, dict] = {}
+        # When each window opened, kept across restarts and "unavailable" gaps,
+        # which reset the state's `last_changed`.
+        self._open_since: dict[str, datetime] = {}
+        # Winter alerts per window: {entity_id: {"count": n, "last": iso}}.
+        # An entry is dropped when its window closes, which rearms that window.
+        self._winter_alerts: dict[str, dict] = {}
 
         # Monotonic time of setup: during STARTUP_GRACE, no action is taken
         # while window states are not yet known (HA reboot).
@@ -114,6 +126,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         self._unsub_state = None
         self._unsub_registry = None
         self._unsub_interval = None
+        self._unsub_season = None
 
     # ── config helpers ───────────────────────────────────────────────────────
     @property
@@ -132,6 +145,34 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
 
     def _opt(self, key, default):
         return self._cfg.get(key, default)
+
+    # ── season (owned by the house entry) ────────────────────────────────────
+    @property
+    def _house(self):
+        return self.hass.data.get(DOMAIN, {}).get(DATA_HOUSE)
+
+    @property
+    def winter(self) -> bool:
+        """Without a house entry a room simply stays in summer behaviour."""
+        house = self._house
+        return bool(house and house.winter)
+
+    def _season_known(self) -> bool:
+        """False while an existing house entry is not loaded yet.
+
+        Rooms and house load independently: evaluating before it is up would
+        apply the summer rules in winter (at boot or during a house reload).
+        """
+        if self._house is not None:
+            return True
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if is_house_entry(entry) and not entry.disabled_by:
+                return entry.state in (
+                    ConfigEntryState.SETUP_ERROR,
+                    ConfigEntryState.MIGRATION_ERROR,
+                    ConfigEntryState.FAILED_UNLOAD,
+                )
+        return True
 
     @property
     def device_info(self) -> dr.DeviceInfo:
@@ -157,6 +198,10 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             self._rain_sent = stored.get("rain_sent", False)
             self._clim_memorized = stored.get("clim_memorized", False)
             self._clim_saved = stored.get("clim_saved", {}) or {}
+            self._winter_alerts = stored.get("winter_alerts", {}) or {}
+            for entity_id, raw in (stored.get("open_since") or {}).items():
+                if since := dt_util.parse_datetime(raw):
+                    self._open_since[entity_id] = since
 
         self._discover()
         self._subscribe()
@@ -169,10 +214,20 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         self._unsub_interval = async_track_time_interval(
             self.hass, self._handle_interval, timedelta(seconds=UPDATE_INTERVAL)
         )
+        self._unsub_season = async_dispatcher_connect(
+            self.hass, SIGNAL_SEASON, self._handle_season
+        )
 
     async def async_shutdown(self) -> None:
-        for unsub in (self._unsub_state, self._unsub_registry, self._unsub_interval):
-            if unsub:
+        # Runs twice on unload (here and from the coordinator's own entry hook).
+        for attr in (
+            "_unsub_state",
+            "_unsub_registry",
+            "_unsub_interval",
+            "_unsub_season",
+        ):
+            if unsub := getattr(self, attr):
+                setattr(self, attr, None)
                 unsub()
         await super().async_shutdown()
 
@@ -183,6 +238,10 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 "rain_sent": self._rain_sent,
                 "clim_memorized": self._clim_memorized,
                 "clim_saved": self._clim_saved,
+                "open_since": {
+                    e: since.isoformat() for e, since in self._open_since.items()
+                },
+                "winter_alerts": self._winter_alerts,
             }
         )
 
@@ -364,6 +423,10 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
     def _handle_interval(self, _now) -> None:
         self.hass.async_create_task(self.async_request_refresh())
 
+    @callback
+    def _handle_season(self) -> None:
+        self.hass.async_create_task(self.async_request_refresh())
+
     # ── temperature & trend ──────────────────────────────────────────────────
     def _indoor_avg(self) -> float | None:
         vals: list[float] = []
@@ -467,21 +530,52 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             e for e in self.windows if self.hass.states.is_state(e, "on")
         ]
 
+    def _track_open_since(self) -> bool:
+        """Maintain the opening time of each window; True if it changed.
+
+        A window keeps its time until it is seen closed: an unavailable sensor
+        or a restart says nothing about the window itself. `last_changed` is
+        only used the first time an open window is seen.
+        """
+        changed = False
+        for e in list(self._open_since):
+            if e not in self.windows:
+                del self._open_since[e]
+                changed = True
+        for e in self.windows:
+            state = self.hass.states.get(e)
+            if state is None:
+                continue
+            if state.state == "on" and e not in self._open_since:
+                self._open_since[e] = state.last_changed
+                changed = True
+            elif state.state == "off" and e in self._open_since:
+                del self._open_since[e]
+                changed = True
+        return changed
+
+    def _opened_for(self, delay_s: int) -> list[str]:
+        """Open windows that have been open continuously for delay_s."""
+        threshold = dt_util.utcnow() - timedelta(seconds=delay_s)
+        return [
+            e
+            for e in self._open_windows()
+            if e in self._open_since and self._open_since[e] <= threshold
+        ]
+
     def _open_delayed(self, delay_s: int) -> bool:
         """True if at least one window has been open continuously for delay_s."""
-        threshold = dt_util.utcnow() - timedelta(seconds=delay_s)
-        for e in self._open_windows():
-            state = self.hass.states.get(e)
-            if state and state.last_changed <= threshold:
-                return True
-        return False
+        return bool(self._opened_for(delay_s))
 
-    def _open_names(self) -> list[str]:
+    def _names_of(self, entity_ids: list[str]) -> list[str]:
         names = []
-        for e in self._open_windows():
+        for e in entity_ids:
             state = self.hass.states.get(e)
             names.append(state.name if state else e)
         return names
+
+    def _open_names(self) -> list[str]:
+        return self._names_of(self._open_windows())
 
     def _states_ready(self) -> bool:
         """False while HA is booting and window states are not known yet.
@@ -512,6 +606,11 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         if indoor is not None and outdoor is not None:
             delta = round(indoor - outdoor, 2)
 
+        if self._track_open_since():
+            await self._persist()
+
+        winter = self.winter
+        house = self._house
         open_windows = self._open_windows()
         available = [
             e
@@ -535,6 +634,11 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             "raining": self._is_raining(),
             "open_names": self._open_names(),
             "open_ids": open_windows,
+            "winter": winter,
+            # Winter: windows open longer than the home-wide maximum.
+            "overdue_ids": (
+                self._opened_for(house.winter_max_open_s) if winter else []
+            ),
         }
         # Distinct reasons airing is no longer useful (drives the message).
         data["airing_reasons"] = self._airing_reasons(data)
@@ -544,6 +648,9 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
 
     def _airing_reasons(self, data: dict) -> list[str]:
         """Which conditions make airing no longer useful (open long enough)."""
+        # Winter is driven by the open time alone, never by the temperature.
+        if data["winter"]:
+            return [REASON_MAX_DURATION] if data["overdue_ids"] else []
         if not data["open_delayed_notify"]:
             return []
         reasons: list[str] = []
@@ -557,6 +664,21 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         if self._opt(CONF_USE_TREND, False) and data["trend_rising"]:
             reasons.append("trend_rising")          # room warming despite open
         return reasons
+
+    def _can_cool(self, entity_id: str) -> bool:
+        """An AC, as opposed to a heat-only device such as a radiator.
+
+        `hvac_modes` is a capability: it is exposed even while the unit is off.
+        """
+        state = self.hass.states.get(entity_id)
+        modes = state.attributes.get("hvac_modes") if state else None
+        return any(mode in COOLING_MODES for mode in modes or ())
+
+    def _climates_to_cut(self, winter: bool) -> list[str]:
+        """Climates to turn off: in winter, heat-only ones stay on by default."""
+        if not winter or self._opt(CONF_WINTER_CUT_HEAT_ONLY, False):
+            return self.climates
+        return [c for c in self.climates if self._can_cool(c)]
 
     def _snapshot_climate(self, entity_id: str) -> dict | None:
         """Capture what is needed to put a running climate back as it was."""
@@ -603,6 +725,9 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         if not self._states_ready():
             _LOGGER.debug("%s: states not ready, skipping evaluation", self.name)
             return
+        if not self._season_known():
+            _LOGGER.debug("%s: season not known yet, skipping evaluation", self.name)
+            return
 
         dirty = False
 
@@ -611,7 +736,7 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
             if data["open_delayed_clim"] and not self._clim_memorized:
                 saved = {
                     c: snap
-                    for c in self.climates
+                    for c in self._climates_to_cut(data["winter"])
                     if (snap := self._snapshot_climate(c)) is not None
                 }
                 if saved:
@@ -637,11 +762,17 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 dirty = True
 
         # ── Airing alert (signal the human via event; dedup on the edge) ─────
-        if data["airing_reasons"] and not self._airing_sent:
-            self._fire(ALERT_AIRING, data)
-            self._airing_sent = True
-            dirty = True
-        elif data["open_count"] == 0 and self._airing_sent:
+        if data["winter"]:
+            dirty |= self._process_winter_alerts(data)
+        else:
+            if self._winter_alerts:
+                self._winter_alerts = {}
+                dirty = True
+            if data["airing_reasons"] and not self._airing_sent:
+                self._fire(ALERT_AIRING, data)
+                self._airing_sent = True
+                dirty = True
+        if data["open_count"] == 0 and self._airing_sent:
             self._airing_sent = False
             dirty = True
 
@@ -662,8 +793,62 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
         if dirty:
             await self._persist()
 
+    def _process_winter_alerts(self, data: dict) -> bool:
+        """Alert per window, with reminders; True if the memory changed.
+
+        Tracked per window so that one closing does not silence another, and
+        one event gathers the windows due at the same time.
+        """
+        house = self._house
+        now = dt_util.utcnow()
+        dirty = False
+
+        for e in list(self._winter_alerts):
+            if e not in self._open_since:
+                del self._winter_alerts[e]
+                dirty = True
+
+        due: list[str] = []
+        reminder = 0
+        interval = timedelta(seconds=house.reminder_interval_s)
+        for e in data["overdue_ids"]:
+            sent = self._winter_alerts.get(e)
+            if sent is None:
+                count = 1
+            elif sent["count"] > house.max_reminders:
+                continue
+            else:
+                last = dt_util.parse_datetime(sent["last"])
+                if last is not None and now - last < interval:
+                    continue
+                count = sent["count"] + 1
+            self._winter_alerts[e] = {"count": count, "last": now.isoformat()}
+            reminder = max(reminder, count - 1)
+            due.append(e)
+
+        if due:
+            oldest = min(self._open_since[e] for e in due)
+            self._fire(
+                ALERT_AIRING,
+                {
+                    **data,
+                    "open_names": self._names_of(due),
+                    "open_ids": due,
+                },
+                reminder=reminder,
+                open_minutes=int((now - oldest).total_seconds() // 60),
+            )
+            dirty = True
+        return dirty
+
     @callback
-    def _fire(self, alert_type: str, data: dict) -> None:
+    def _fire(
+        self,
+        alert_type: str,
+        data: dict,
+        reminder: int = 0,
+        open_minutes: int | None = None,
+    ) -> None:
         area = ar.async_get(self.hass).async_get_area(self.area_id)
         self.hass.bus.async_fire(
             EVENT_ALERT,
@@ -678,5 +863,8 @@ class WindowAiringCoordinator(DataUpdateCoordinator):
                 "windows": data["open_names"],
                 "window_ids": data["open_ids"],
                 "reasons": data.get("airing_reasons", []),
+                "winter": data["winter"],
+                "reminder": reminder,
+                "open_minutes": open_minutes,
             },
         )

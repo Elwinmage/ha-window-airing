@@ -2,12 +2,27 @@
   "config": {
     "step": {
       "user": {
+        "title": "Surveillance fenêtre",
+        "description": "Que voulez-vous ajouter ? Les pièces se surveillent une par une. L'entrée Maison est facultative et unique : elle ajoute le mode hiver pour toutes les pièces.",
+        "menu_options": {
+          "room": "Une pièce",
+          "house": "La maison (mode hiver)"
+        }
+      },
+      "room": {
         "title": "Surveillance fenêtre — pièce",
         "description": "Choisissez la pièce à surveiller et la source de température extérieure (partagée) : un capteur de température, ou une entité météo (ex. Met.no) s'il n'y a pas de sonde extérieure. Un capteur de pluie est facultatif. Les contacts de fenêtre, la température intérieure et la climatisation sont découverts automatiquement dans la pièce.",
         "data": {
           "area_id": "Pièce",
           "exterior_temp": "Température extérieure (capteur ou entité météo)",
           "rain_sensor": "Capteur de pluie (binary_sensor ou sensor en mm, facultatif)"
+        }
+      },
+      "house": {
+        "title": "Surveillance fenêtre — maison",
+        "description": "Choisissez les climates à surveiller pour le passage automatique en hiver. Laissez vide pour n'utiliser le switch qu'à la main. Les seuils, les mois et les rappels se règlent ensuite dans Configurer.",
+        "data": {
+          "heating_climates": "Climates qui pilotent le changement de saison automatique"
         }
       }
     },
@@ -36,9 +51,26 @@
           "exclude_entities": "Entités exclues (toute la découverte)",
           "override_windows": "Override — contacts de fenêtre",
           "override_indoor": "Override — température intérieure (capteur ou climatisation)",
-          "override_clim": "Override — climatisation"
+          "override_clim": "Override — climatisation",
+          "winter_cut_heat_only": "Hiver : couper aussi les appareils qui ne font que chauffer"
+        }
+      },
+      "house": {
+        "title": "Surveillance fenêtre — maison",
+        "description": "Les changements automatiques ne se font que pendant leur période : l'hiver de son mois de début à celui de l'été, l'été de son mois de début à celui de l'hiver. Le switch reste utilisable à la main toute l'année. La durée maximale se règle avec l'entité Durée d'ouverture maximale en hiver.",
+        "data": {
+          "heating_climates": "Climates qui pilotent le changement de saison automatique",
+          "winter_heating_minutes": "Temps de chauffe journalier qui fait passer en hiver (min)",
+          "summer_idle_days": "Jours sans chauffage qui font repasser en été (0 = jamais)",
+          "winter_start_month": "Hiver automatique possible à partir de",
+          "summer_start_month": "Été automatique possible à partir de",
+          "winter_reminder_interval": "Temps entre deux rappels d'hiver (min)",
+          "winter_max_reminders": "Rappels d'hiver après la première alerte (0 = aucun)"
         }
       }
+    },
+    "error": {
+      "same_month": "Les deux mois doivent être différents."
     }
   },
   "entity": {
@@ -51,6 +83,9 @@
       },
       "sources": {
         "name": "Entités surveillées"
+      },
+      "heating_today": {
+        "name": "Temps de chauffe aujourd'hui"
       }
     },
     "binary_sensor": {
@@ -67,6 +102,32 @@
     "number": {
       "notify_delay": {
         "name": "Délai avant notification"
+      },
+      "winter_max_open": {
+        "name": "Durée d'ouverture maximale en hiver"
+      }
+    },
+    "switch": {
+      "winter_mode": {
+        "name": "Mode hiver"
+      }
+    }
+  },
+  "selector": {
+    "month": {
+      "options": {
+        "1": "Janvier",
+        "2": "Février",
+        "3": "Mars",
+        "4": "Avril",
+        "5": "Mai",
+        "6": "Juin",
+        "7": "Juillet",
+        "8": "Août",
+        "9": "Septembre",
+        "10": "Octobre",
+        "11": "Novembre",
+        "12": "Décembre"
       }
     }
   }

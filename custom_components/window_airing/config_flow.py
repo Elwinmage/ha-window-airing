@@ -20,9 +20,11 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_AREA,
     CONF_DEVICE_CLASSES,
+    CONF_ENTRY_TYPE,
     CONF_EXCLUDE_ENTITIES,
     CONF_EXCLUDE_PLATFORMS,
     CONF_EXTERIOR_TEMP,
+    CONF_HEATING_CLIMATES,
     CONF_MANAGE_CLIM,
     CONF_OPEN_DELAY,
     CONF_OVERRIDE_CLIM,
@@ -31,17 +33,33 @@ from .const import (
     CONF_RAIN_ALERT,
     CONF_RAIN_MM_THRESHOLD,
     CONF_RAIN_SENSOR,
+    CONF_SUMMER_IDLE_DAYS,
+    CONF_SUMMER_START_MONTH,
     CONF_THRESHOLD,
     CONF_USE_TREND,
     CONF_WEATHER,
     CONF_WEATHER_RAIN_STATES,
+    CONF_WINTER_CUT_HEAT_ONLY,
+    CONF_WINTER_HEATING_MIN,
+    CONF_WINTER_MAX_REMINDERS,
+    CONF_WINTER_REMINDER_INTERVAL,
+    CONF_WINTER_START_MONTH,
     DEFAULT_DEVICE_CLASSES,
     DEFAULT_EXCLUDE_PLATFORMS,
     DEFAULT_OPEN_DELAY,
     DEFAULT_RAIN_MM_THRESHOLD,
+    DEFAULT_SUMMER_IDLE_DAYS,
+    DEFAULT_SUMMER_START_MONTH,
     DEFAULT_THRESHOLD,
     DEFAULT_WEATHER_RAIN_STATES,
+    DEFAULT_WINTER_HEATING_MIN,
+    DEFAULT_WINTER_MAX_REMINDERS,
+    DEFAULT_WINTER_REMINDER_INTERVAL,
+    DEFAULT_WINTER_START_MONTH,
     DOMAIN,
+    ENTRY_HOUSE,
+    HOUSE_UNIQUE_ID,
+    is_house_entry,
 )
 
 # Labels of the read-only recap shown at the top of the options form. Built in
@@ -63,6 +81,7 @@ _RECAP_LABELS = {
         "excluded_entity": "excluded entity",
         "excluded_platform": "excluded integration",
         "not_loaded": "The room is not loaded: the discovered entities cannot be shown.",
+        "house": "House",
     },
     "fr": {
         "windows": "Contacts de fenêtre",
@@ -80,6 +99,7 @@ _RECAP_LABELS = {
         "excluded_entity": "entité exclue",
         "excluded_platform": "intégration exclue",
         "not_loaded": "La pièce n'est pas chargée : impossible d'afficher les entités découvertes.",
+        "house": "Maison",
     },
 }
 
@@ -174,6 +194,76 @@ CONFIG_SCHEMA = vol.Schema(
         vol.Optional(CONF_RAIN_SENSOR): _RAIN_SELECTOR,
     }
 )
+
+
+_CLIMATES_SELECTOR = selector.EntitySelector(
+    selector.EntitySelectorConfig(domain="climate", multiple=True)
+)
+_MONTH_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=[str(month) for month in range(1, 13)],
+        mode=selector.SelectSelectorMode.DROPDOWN,
+        translation_key="month",
+    )
+)
+
+
+def _minutes_selector(minimum: int, maximum: int) -> selector.NumberSelector:
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=minimum, max=maximum, step=1, unit_of_measurement="min",
+            mode=selector.NumberSelectorMode.BOX,
+        )
+    )
+
+
+def _house_schema(current: dict[str, Any]) -> vol.Schema:
+    def val(key, fallback):
+        return current.get(key, fallback)
+
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_HEATING_CLIMATES, default=val(CONF_HEATING_CLIMATES, [])
+            ): _CLIMATES_SELECTOR,
+            vol.Optional(
+                CONF_WINTER_HEATING_MIN,
+                default=val(CONF_WINTER_HEATING_MIN, DEFAULT_WINTER_HEATING_MIN),
+            ): _minutes_selector(1, 1440),
+            vol.Optional(
+                CONF_SUMMER_IDLE_DAYS,
+                default=val(CONF_SUMMER_IDLE_DAYS, DEFAULT_SUMMER_IDLE_DAYS),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=60, step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_WINTER_START_MONTH,
+                default=str(val(CONF_WINTER_START_MONTH, DEFAULT_WINTER_START_MONTH)),
+            ): _MONTH_SELECTOR,
+            vol.Optional(
+                CONF_SUMMER_START_MONTH,
+                default=str(val(CONF_SUMMER_START_MONTH, DEFAULT_SUMMER_START_MONTH)),
+            ): _MONTH_SELECTOR,
+            vol.Optional(
+                CONF_WINTER_REMINDER_INTERVAL,
+                default=val(
+                    CONF_WINTER_REMINDER_INTERVAL, DEFAULT_WINTER_REMINDER_INTERVAL
+                ),
+            ): _minutes_selector(1, 120),
+            vol.Optional(
+                CONF_WINTER_MAX_REMINDERS,
+                default=val(CONF_WINTER_MAX_REMINDERS, DEFAULT_WINTER_MAX_REMINDERS),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=20, step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+        }
+    )
 
 
 def _optional_entity(key: str, current: dict[str, Any]) -> vol.Optional:
@@ -278,6 +368,10 @@ def _options_schema(current: dict[str, Any], extra_platforms: list[str]) -> vol.
             vol.Optional(
                 CONF_MANAGE_CLIM, default=num(CONF_MANAGE_CLIM, False)
             ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_WINTER_CUT_HEAT_ONLY,
+                default=num(CONF_WINTER_CUT_HEAT_ONLY, False),
+            ): selector.BooleanSelector(),
             # ── Rain alert ───────────────────────────────────────────────────
             vol.Optional(
                 CONF_RAIN_ALERT, default=num(CONF_RAIN_ALERT, False)
@@ -333,11 +427,43 @@ def _options_schema(current: dict[str, Any], extra_platforms: list[str]) -> vol.
 
 
 class WindowAiringConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle the initial config: pick a room and its sensors."""
+    """Handle the initial config: a room, or the unique house entry."""
 
     VERSION = 1
 
+    def _house_configured(self) -> bool:
+        return any(is_house_entry(e) for e in self._async_current_entries())
+
     async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if self._house_configured():
+            return await self.async_step_room()
+        return self.async_show_menu(step_id="user", menu_options=["room", "house"])
+
+    async def async_step_house(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            await self.async_set_unique_id(HOUSE_UNIQUE_ID)
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(
+                title=_recap_labels(self.hass)["house"],
+                data={CONF_ENTRY_TYPE: ENTRY_HOUSE, **user_input},
+            )
+
+        return self.async_show_form(
+            step_id="house",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_HEATING_CLIMATES, default=[]
+                    ): _CLIMATES_SELECTOR
+                }
+            ),
+        )
+
+    async def async_step_room(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
@@ -348,12 +474,47 @@ class WindowAiringConfigFlow(ConfigFlow, domain=DOMAIN):
             title = area.name if area else user_input[CONF_AREA]
             return self.async_create_entry(title=title, data=user_input)
 
-        return self.async_show_form(step_id="user", data_schema=CONFIG_SCHEMA)
+        return self.async_show_form(step_id="room", data_schema=CONFIG_SCHEMA)
 
     @staticmethod
     @callback
     def async_get_options_flow(entry: ConfigEntry) -> OptionsFlow:
+        if is_house_entry(entry):
+            return WindowAiringHouseOptionsFlow(entry)
         return WindowAiringOptionsFlow(entry)
+
+
+class WindowAiringHouseOptionsFlow(OptionsFlow):
+    """Tune the automatic season change and the winter reminders."""
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        self.entry = entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self.async_step_house(user_input)
+
+    async def async_step_house(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        current = {**self.entry.data, **self.entry.options}
+        if user_input is not None:
+            # Equal months would leave no period for either automatic switch.
+            winter = user_input[CONF_WINTER_START_MONTH]
+            if winter == user_input[CONF_SUMMER_START_MONTH]:
+                errors["base"] = "same_month"
+                current = user_input
+            else:
+                # Stored as is: an emptied climate list must override `data`.
+                return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="house",
+            data_schema=_house_schema(current),
+            errors=errors,
+        )
 
 
 class WindowAiringOptionsFlow(OptionsFlow):
